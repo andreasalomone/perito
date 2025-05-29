@@ -1,54 +1,177 @@
 body {
-    font-family: sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     margin: 0;
-    background-color: #f4f4f4;
+    background-color: #1a1a1a; /* Dark background */
+    color: #e0e0e0; /* Light text color for contrast */
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
+    padding: 20px;
+    box-sizing: border-box;
 }
 
 .container {
-    background-color: #fff;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    width: 80%;
-    max-width: 600px;
+    background-color: #2c2c2c; /* Slightly lighter dark for container */
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    max-width: 650px;
+    border: 1px solid #444; /* Subtle border */
 }
 
 h1 {
     text-align: center;
-    color: #333;
+    color: #ffffff; /* White for headings */
+    margin-bottom: 30px;
+    font-size: 2em;
 }
 
 form {
     display: flex;
     flex-direction: column;
+    gap: 20px; /* Spacing between form elements */
 }
 
 label {
-    margin-bottom: 8px;
-    font-weight: bold;
+    margin-bottom: 0; /* Adjusted as gap is used in form */
+    font-weight: 500; /* Medium weight */
+    font-size: 0.95em;
+    color: #c7c7c7; /* Lighter grey for labels */
 }
 
 input[type="file"] {
-    margin-bottom: 20px;
-    padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    margin-bottom: 0; /* Adjusted */
+    padding: 12px 15px;
+    border: 1px solid #555; /* Darker border */
+    border-radius: 8px;
+    background-color: #3b3b3b; /* Dark input background */
+    color: #e0e0e0;
+    font-size: 1em;
 }
 
-button[type="submit"] {
+input[type="file"]::file-selector-button {
     background-color: #007bff;
     color: white;
     padding: 10px 15px;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 16px;
+    margin-right: 10px;
+    font-weight: 500;
+    transition: background-color 0.2s ease-in-out;
+}
+
+input[type="file"]::file-selector-button:hover {
+    background-color: #0056b3;
+}
+
+button[type="submit"] {
+    background-color: #007bff; /* Primary blue */
+    color: white;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.1em;
+    font-weight: 500;
+    transition: background-color 0.2s ease-in-out;
 }
 
 button[type="submit"]:hover {
+    background-color: #0056b3; /* Darker blue on hover */
+}
+
+/* Flash message styling for dark mode */
+.flash-messages {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 20px 0;
+}
+
+.flash-messages li {
+    padding: 12px 15px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    font-weight: 500;
+    border: 1px solid transparent;
+}
+
+.flash-messages .error {
+    background-color: #5c2122; /* Dark red background */
+    color: #f8d7da; /* Light red text */
+    border-color: #8c2f30;
+}
+
+.flash-messages .warning {
+    background-color: #664d03; /* Dark yellow background */
+    color: #fff3cd; /* Light yellow text */
+    border-color: #997404;
+}
+
+.flash-messages .success {
+    background-color: #1f4a25; /* Dark green background */
+    color: #d4edda; /* Light green text */
+    border-color: #2a6734;
+}
+
+/* Styles for report.html */
+textarea#report_content {
+    width: 100%; /* Use 100% width for better responsiveness */
+    min-height: 450px;
+    padding: 15px;
+    border: 1px solid #555; /* Darker border */
+    border-radius: 8px;
+    background-color: #3b3b3b; /* Dark input background */
+    color: #e0e0e0; /* Light text */
+    font-family: "Menlo", "Consolas", "Monaco", monospace; /* Consistent monospaced font */
+    font-size: 0.95em;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    box-sizing: border-box; /* Include padding and border in the element's total width and height */
+    margin-bottom: 20px; /* Add some space below the textarea */
+}
+
+.button-group {
+    display: flex; /* Use flexbox for better alignment */
+    justify-content: flex-end; /* Align buttons to the right */
+    gap: 15px; /* Space between buttons */
+    margin-top: 20px;
+}
+
+/* General button styling (can be extended if more button types are needed) */
+.button-group button,
+.button-group input[type="button"],
+.button-group input[type="submit"] /* If using input for buttons */
+{
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: 500;
+    transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+}
+
+/* Primary button style (e.g., Download) */
+.button-group button[type="submit"] {
+    background-color: #007bff;
+    color: white;
+}
+
+.button-group button[type="submit"]:hover {
     background-color: #0056b3;
+}
+
+/* Secondary/Default button style (e.g., Back) */
+.button-group button[type="button"] {
+    background-color: #495057; /* Dark grey */
+    color: #f8f9fa; /* Light text */
+    border: 1px solid #6c757d; /* Subtle border */
+}
+
+.button-group button[type="button"]:hover {
+    background-color: #5a6268;
+    border-color: #788088;
 } 

@@ -32,9 +32,48 @@
             color: #155724;
             border: 1px solid #c3e6cb;
         }
+        /* Added Spinner CSS */
+        .spinner-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000; /* Ensure it's on top */
+            visibility: hidden; /* Hidden by default */
+        }
+        .spinner {
+            border: 8px solid #f3f3f3; /* Light grey */
+            border-top: 8px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 2s linear infinite;
+        }
+        .spinner-text {
+            color: white;
+            margin-top: 20px;
+            font-size: 1.2em;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
+    <!-- Added Spinner HTML -->
+    <div class="spinner-overlay" id="loadingSpinner">
+        <div style="text-align: center;">
+            <div class="spinner"></div>
+            <p class="spinner-text">Generando il report...</p>
+        </div>
+    </div>
+
     <div class="container">
         <h1>AI Insurance Report Generator</h1>
 
@@ -54,5 +93,26 @@
             <button type="submit">Generate Report</button>
         </form>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            const spinner = document.getElementById('loadingSpinner');
+
+            if (form && spinner) {
+                form.addEventListener('submit', function() {
+                    // Check if files are selected
+                    const fileInput = document.getElementById('files');
+                    if (fileInput && fileInput.files.length > 0) {
+                        spinner.style.visibility = 'visible';
+                    } else {
+                        // Optionally, you can display an error message if no files are selected
+                        // and prevent form submission if you haven't used the 'required' attribute
+                        // For now, we assume the 'required' attribute handles this.
+                    }
+                });
+            }
+        });
+    </script>
 </body>
 </html> 
