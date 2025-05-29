@@ -1,0 +1,148 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Okay, this is a well-structured project with a good amount of modern Python tooling. Based on the provided code and the directions, here's a comprehensive list of critical elements to evaluate during a code review for a project like `andreasalomone-bot-perito`:
+
+**I. Correctness & Functional Requirements**
+
+1.  **Core Functionality:**
+    *   Does the code achieve its primary goal (e.g., generate a DOCX report from uploaded files and notes)?
+    *   Are all specified features implemented (text extraction, RAG, LLM pipeline, DOCX injection)?
+    *   Does it handle all documented input types correctly (PDF, DOCX, images)?
+    *   Are outputs accurate and as expected (e.g., the DOCX content matches the LLM output)?
+2.  **Edge Cases & Input Validation:**
+    *   How does it handle empty files, corrupted files, or files of unexpected types beyond basic MIME validation (e.g., a `.docx` that isn't a valid Office Open XML)?
+    *   How does it handle missing `notes` or `damage_imgs`?
+    *   What if the LLM returns an unexpected structure or malformed JSON not caught by `extract_json`?
+    *   Are size limits (e.g., `MAX_FILE_SIZE`, `MAX_PROMPT_CHARS`) robustly enforced and tested?
+    *   Does `guard_corpus` correctly truncate and append the warning?
+3.  **Logic & Flow:**
+    *   Is the sequence of operations logical (e.g., extract -> RAG (optional) -> LLM base -> LLM pipeline -> inject)?
+    *   Are conditional flows (e.g., `if use_rag:`) handled correctly?
+    *   Is `async/await` used correctly, especially around I/O operations (file reading, API calls)? Are there any accidental blocking calls in async functions?
+
+**II. Coding Standards, Style Guide & Best Practices (SOLID, KISS, DRY)**
+
+1.  **Adherence to Linters/Formatters:**
+    *   Is the code formatted according to `black` and `isort` (as defined in `pyproject.toml` and `.pre-commit-config.yaml`)?
+    *   Does it pass `flake8` checks (as per `.flake8` and pre-commit)?
+    *   Does it pass `mypy` checks for type safety (as per `mypy.ini` and pre-commit)?
+2.  **Naming Conventions:**
+    *   Are variables, functions, classes, and modules named clearly, consistently, and descriptively (PEP 8)?
+3.  **Readability & Simplicity (KISS):**
+    *   Is the code easy to understand?
+    *   Are functions and methods concise and focused on a single task?
+    *   Is there any overly complex logic that could be simplified? (e.g., nested comprehensions, complex conditional chains).
+    *   Are magic numbers or strings avoided (replaced with constants or enums)?
+4.  **Duplication (DRY):**
+    *   Is there any repeated code that could be refactored into reusable functions or classes?
+    *   The prompt building logic (`build_prompt.jinja2`, `expand_section_prompt.jinja2`, etc.) seems distinct, which is good.
+5.  **Modularity & Cohesion (SRP - Single Responsibility Principle):**
+    *   Are modules and classes well-defined with clear responsibilities (e.g., `app/services/extractor.py` for extraction, `app/services/llm.py` for LLM interactions)?
+    *   Is there high cohesion within modules/classes and low coupling between them?
+6.  **Configuration Management:**
+    *   Is `app/core/config.py` (using `pydantic-settings`) used effectively for all configurations?
+    *   Are secrets handled appropriately (e.g., loaded from `.env`, not hardcoded)?
+7.  **Python-Specific Best Practices:**
+    *   Correct use of context managers (`with open(...)`, `TemporaryDirectory()`)?
+    *   Appropriate use of data structures (lists, dicts, sets, tuples)?
+    *   Generator expressions or iterators for memory efficiency where applicable?
+    *   Effective use of f-strings for string formatting?
+
+**III. Readability, Maintainability & Documentation**
+
+1.  **Code Clarity:**
+    *   Is the control flow easy to follow?
+    *   Are comments used effectively to explain *why* something is done, not *what* (if the "what" isn't obvious from the code)?
+    *   Are complex sections broken down appropriately?
+2.  **Docstrings & Type Hinting:**
+    *   Are public functions, classes, and modules documented with clear docstrings (PEP 257)?
+    *   Is type hinting (`mypy`) used consistently and correctly? Are return types clear?
+    *   The project seems to have good type hinting based on `mypy.ini`.
+3.  **Maintainability:**
+    *   How easy would it be for another developer to understand and modify this code?
+    *   Are dependencies clear and managed (e.g., via `requirements.txt`)?
+    *   Is the project structure (`README.md`'s "Project Structure" section) logical and easy to navigate?
+4.  **`README.md` & Project Documentation:**
+    *   Is the `README.md` up-to-date, comprehensive, and accurate?
+    *   Does it clearly explain setup, configuration, running, testing, and deployment?
+
+**IV. Performance Bottlenecks, Security Vulnerabilities & Scalability**
+
+1.  **Performance:**
+    *   Any obvious performance anti-patterns (e.g., reading large files entirely into memory if streaming is possible, inefficient loops, synchronous blocking calls in async code)?
+    *   The use of `asyncio.gather` in `app/api/routes.py` for parallel file/image processing is good.
+    *   Is the `TemporaryDirectory` usage efficient, or could it lead to disk space issues under high load (though cleanup is scheduled)?
+    *   Are LLM API calls made efficiently? `tenacity` for retries is good.
+    *   Is `async_lru` on `_embed_async` in `RAGService` effective?
+    *   Image thumbnailing in `_image_handler` and `extract_damage_image` is good for performance.
+2.  **Security:**
+    *   **Input Validation:** `app/core/validation.py` looks to handle file type and size. Is it robust against malicious inputs (e.g., zip bombs if archives were allowed, though they aren't here)?
+    *   **API Key Security:** `app/core/security.py` implements API key checks. Is the key comparison constant-time (less critical for server-side keys but good practice)?
+    *   **Prompt Injection:** While hard to fully prevent with LLMs, are there any obvious ways user input (files, notes) could maliciously alter the structure or intent of prompts to the LLM beyond the intended data provision?
+    *   **Dependency Security:** Are dependencies regularly updated and checked for vulnerabilities (e.g., using `pip-audit` or GitHub Dependabot)? `requirements.txt` pins versions, which is good for reproducibility but needs active management for security.
+    *   **Data Handling:** Is any sensitive data from uploaded documents logged or stored longer than necessary (temp files are cleaned up)?
+    *   **File System Access:** Is file path handling safe (e.g., avoiding path traversal if user-supplied names were used to construct paths, though here names are from `UploadFile` objects or fixed paths)?
+3.  **Scalability:**
+    *   Is the application stateless (important for serverless deployments like Vercel)?
+    *   How would the system handle a large number of concurrent requests, especially concerning LLM API rate limits or Supabase connections?
+    *   Vercel `maxDuration` is 30s. Are any operations (especially LLM calls or large file processing) at risk of timing out? Retries in `call_llm` help, but what if the LLM is just slow?
+    *   The use of `asyncio.to_thread` for `supabase.rpc` in `RAGService` is crucial for not blocking the event loop.
+
+**V. Simplification, Duplication Removal & Modularity**
+
+*   (Covered mostly by DRY and KISS above)
+*   Are there any utility functions that could be shared across different services?
+*   Could any large functions/methods be broken down further?
+*   The `_extract_single_file` and `_process_single_image` helpers in `app/api/routes.py` are good examples of breaking down logic.
+
+**VI. Error Handling & Logging**
+
+1.  **Error Handling:**
+    *   Are exceptions handled gracefully? Are specific exceptions caught rather than generic `except Exception:`? (The project uses custom exceptions like `ExtractorError`, `LLMError`, etc., which is good).
+    *   Are appropriate HTTP status codes returned to the client (e.g., 400, 413, 500)? FastAPI exception handlers in `app/main.py` seem to cover this.
+    *   Does the application fail predictably if a critical service (LLM, Supabase) is down? Retries help.
+    *   What happens if `extract_json` fails to parse the LLM response? `JSONParsingError` is raised and handled.
+2.  **Logging:**
+    *   Is logging comprehensive enough for debugging and monitoring? `app/core/logging.py` sets up basic logging.
+    *   Are log levels used appropriately (INFO, DEBUG, WARNING, ERROR)?
+    *   Are request IDs (`request_id = str(uuid4())`) used in logs to trace a single request's lifecycle? (Yes, this is done well).
+    *   Is sensitive information (e.g., API keys, full file content if not intended) excluded from logs?
+    *   Are tracebacks logged for unhandled exceptions?
+
+**VII. Testing**
+
+1.  **Test Coverage:**
+    *   Are new features and bug fixes covered by tests? (Unit tests in `tests/unit/`, E2E in `tests/e2e/`).
+    *   Are critical paths and business logic well-tested?
+    *   The `README.md` mentions test fixtures.
+2.  **Test Quality:**
+    *   Are tests readable, maintainable, and independent?
+    *   Do tests cover edge cases and potential failure scenarios (e.g., `test_generate_limit.py`)?
+    *   Are mocks and stubs used effectively (e.g., `monkeypatch` is used extensively in tests)?
+    *   Are E2E tests truly end-to-end or do they mock out key external services? `test_generate_full.py` mocks out LLM and pipeline, which is more of an integration test for the FastAPI path. A true E2E would hit a test LLM/Supabase.
+    *   The unit tests seem to cover individual components well.
+3.  **Test Execution:**
+    *   Do all tests pass consistently?
+    *   Are tests part of the CI/CD pipeline (implied by `pre-commit` having a pytest hook, though it `pass_filenames: false` so it runs all tests)?
+
+**VIII. Impact on Existing Codebase & Architecture**
+
+1.  **Architectural Coherence:**
+    *   Does the new code fit the existing architecture (FastAPI services, core utilities)?
+    *   Does it introduce any architectural smells or increase technical debt?
+2.  **Dependencies:**
+    *   Does it add new dependencies? Are they necessary and well-maintained?
+    *   Are there version conflicts or a significant increase in bundle size (especially for serverless)?
+3.  **Breaking Changes:**
+    *   Does the change introduce any backward-incompatible changes to APIs or behavior?
+
+**IX. Constructive Feedback (Meta-Consideration)**
+
+*   Is the feedback clear, specific, and actionable?
+*   Is the tone professional and collaborative?
+*   Are suggestions for improvement provided, not just criticisms?
+
+This list should provide a solid framework for reviewing the `andreasalomone-bot-perito` project. The project already shows good practices in many areas, so the review can focus on refining these and ensuring robustness.
