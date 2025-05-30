@@ -85,10 +85,10 @@ def upload_files() -> Union[str, FlaskResponse]:
         return redirect(request.url)
 
     processed_file_data: List[Dict[str, Any]] = []
-    text_from_other_files: str = ""
     uploaded_filenames_for_display: List[str] = []
     temp_dir: Union[str, None] = None
     total_upload_size = 0
+    current_total_extracted_text_length = 0
 
     try:
         for file_storage in files:
@@ -137,22 +137,74 @@ def upload_files() -> Union[str, FlaskResponse]:
                     logger.info(f"Saved uploaded file to temporary path: {filepath}")
                     uploaded_filenames_for_display.append(filename)
                     
-                    processed_info: Dict[str, Any] = document_processor.process_uploaded_file(filepath)
-                    processed_file_data.append(processed_info)
+                    processed_info: Dict[str, Any] = document_processor.process_uploaded_file(filepath, temp_dir)
+                    
+                    def add_text_data_to_processed_list(
+                        text_content: str, 
+                        original_filename: str, 
+                        source_description: str
+                    ) -> None:
+                        nonlocal current_total_extracted_text_length
+                        if not text_content:
+                            return
 
-                    if processed_info.get('type') == 'text' and processed_info.get('content'):
-                        extracted_text_part = processed_info['content']
-                        text_header = f"--- START OF EXTRACTED TEXT FROM FILE: {filename} ---\n"
-                        text_footer = f"\n--- END OF EXTRACTED TEXT FROM FILE: {filename} ---\n\n"
-                        full_part_text = text_header + extracted_text_part + text_footer
-
-                        if len(text_from_other_files) + len(full_part_text) > settings.MAX_EXTRACTED_TEXT_LENGTH:
-                            logger.warning(f"Aggregated text from DOCX/XLSX/TXT reached limit of {settings.MAX_EXTRACTED_TEXT_LENGTH} characters. Further text from {filename} and subsequent files will be truncated/skipped.")
-                            remaining_space = settings.MAX_EXTRACTED_TEXT_LENGTH - len(text_from_other_files)
-                            text_from_other_files += full_part_text[:remaining_space]
-                            flash(f"Combined text from non-PDF/image files is very large. Content from {filename} onwards might be truncated.", "warning")
+                        # Check if adding this text would exceed the limit
+                        if current_total_extracted_text_length + len(text_content) > settings.MAX_EXTRACTED_TEXT_LENGTH:
+                            remaining_space = settings.MAX_EXTRACTED_TEXT_LENGTH - current_total_extracted_text_length
+                            if remaining_space > 0:
+                                truncated_content = text_content[:remaining_space]
+                                processed_file_data.append({
+                                    'type': 'text',
+                                    'content': truncated_content,
+                                    'filename': f"{original_filename} ({source_description} - truncated)"
+                                })
+                                current_total_extracted_text_length += len(truncated_content)
+                                logger.warning(f"Text from {original_filename} ({source_description}) was truncated due to total length limit.")
+                                flash(f"Text from {original_filename} ({source_description}) was truncated to fit within the overall text limit.", "warning")
+                            else:
+                                logger.warning(f"No space left to add text from {original_filename} ({source_description}). It was skipped.")
+                                flash(f"Text from {original_filename} ({source_description}) was skipped as the overall text limit was reached.", "warning")
+                            # Once limit is hit (or no space for current item), can potentially stop adding more text.
+                            # For now, we just skip or truncate this item and continue trying others.
                         else:
-                            text_from_other_files += full_part_text
+                            processed_file_data.append({
+                                'type': 'text',
+                                'content': text_content,
+                                'filename': f"{original_filename} ({source_description})"
+                            })
+                            current_total_extracted_text_length += len(text_content)
+
+                    if processed_info.get('type') == 'error' or processed_info.get('type') == 'unsupported':
+                        processed_file_data.append(processed_info) # Add error/unsupported info directly
+                    elif processed_info.get('original_filetype') == 'eml':
+                        if processed_info.get('type') == 'text' and processed_info.get('content'):
+                            add_text_data_to_processed_list(
+                                processed_info['content'], 
+                                filename, 
+                                "email body"
+                            )
+                        
+                        if 'processed_attachments' in processed_info and isinstance(processed_info['processed_attachments'], list):
+                            for attachment_data in processed_info['processed_attachments']:
+                                if attachment_data.get('type') == 'text' and attachment_data.get('content'):
+                                    add_text_data_to_processed_list(
+                                        attachment_data['content'],
+                                        attachment_data.get('filename', 'unknown_attachment'),
+                                        f"attachment from EML: {filename}"
+                                    )
+                                elif attachment_data.get('type') == 'vision':
+                                    processed_file_data.append(attachment_data) # Add vision attachments directly
+                                elif attachment_data.get('type') == 'error' or attachment_data.get('type') == 'unsupported':
+                                    processed_file_data.append(attachment_data) # Add attachment errors directly
+                    
+                    elif processed_info.get('type') == 'text' and processed_info.get('content'):
+                        add_text_data_to_processed_list(
+                            processed_info['content'],
+                            filename,
+                            "file content" # Generic source for other text files
+                        )
+                    elif processed_info.get('type') == 'vision':
+                         processed_file_data.append(processed_info) # Add vision files directly
 
                 except Exception as e:
                     logger.error(f"Error saving or processing file {filename}: {e}", exc_info=True)
@@ -170,7 +222,7 @@ def upload_files() -> Union[str, FlaskResponse]:
 
         report_content: str = llm_handler.generate_report_from_content(
             processed_files=processed_file_data, 
-            additional_text=text_from_other_files
+            additional_text=""
         )
 
         if report_content.startswith("Error:"):

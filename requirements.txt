@@ -30,6 +30,7 @@ Jinja2==3.1.6
 jiter==0.10.0
 lxml==5.4.0
 MarkupSafe==3.0.2
+mail-parser
 matplotlib-inline==0.1.7
 multidict==6.4.4
 openai==0.27.10

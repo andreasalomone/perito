@@ -7,10 +7,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     FLASK_SECRET_KEY: str = "robertone"
     
-    ALLOWED_EXTENSIONS: Set[str] = {'png', 'jpg', 'jpeg', 'xlsx', 'pdf', 'docx', 'txt'}
+    ALLOWED_EXTENSIONS: Set[str] = {'png', 'jpg', 'jpeg', 'xlsx', 'pdf', 'docx', 'txt', 'eml'}
     MAX_FILE_SIZE_MB: int = 25  # Maximum size for a single uploaded file in MB
     MAX_TOTAL_UPLOAD_SIZE_MB: int = 100 # Maximum total size for all files in a single upload request
-    MAX_EXTRACTED_TEXT_LENGTH: int = 300000  # Maximum characters for combined extracted text sent to LLM
+    MAX_EXTRACTED_TEXT_LENGTH: int = 500000  # Maximum characters for combined extracted text sent to LLM
     
     LLM_MODEL_NAME: str = "gemini-2.5-flash-preview-05-20"
     LLM_TEMPERATURE: float = 0.5

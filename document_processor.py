@@ -9,6 +9,9 @@ from typing import List, Union, Callable, Any, TypeVar, Dict # Added Dict
 import logging
 import functools
 import mimetypes # Added for MIME type guessing
+import mailparser # Added for .eml files
+import base64 # Added for decoding attachments
+import pathlib # Added for path manipulation
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +104,92 @@ def extract_text_from_txt(txt_path: str) -> Dict[str, str]:
         content = f.read()
     return {'type': 'text', 'content': content, 'filename': os.path.basename(txt_path)}
 
-def process_uploaded_file(filepath: str) -> Dict[str, Any]:
+@handle_extraction_errors({'type': 'text', 'content': '', 'filename': '', 'processed_attachments': []})
+def process_eml_file(eml_path: str, upload_folder: str) -> Dict[str, Any]:
+    """
+    Processes an .eml file, extracting its text body and saving/processing attachments.
+    Returns a dictionary with the text content and a list of processed attachment information.
+    """
+    mail = mailparser.parse_from_file(eml_path)
+    
+    # Extract plain text body
+    # Prioritize text_plain, then html (converted to text by mailparser), then body
+    if mail.text_plain:
+        text_content = "\n".join(mail.text_plain)
+    elif mail.text_html:
+        text_content = "\n".join(mail.text_html) # mailparser often provides a text version from html
+    else:
+        text_content = mail.body if mail.body else ""
+        if not text_content:
+             logger.warning(f"EML file {eml_path} has no discernible text body (text_plain, text_html, or body).")
+
+    processed_attachments_info: List[Dict[str, Any]] = []
+
+    # Ensure the 'out' directory for attachments exists within the upload_folder
+    attachments_output_dir = pathlib.Path(upload_folder) / "email_attachments"
+    attachments_output_dir.mkdir(parents=True, exist_ok=True)
+
+    for attachment in mail.attachments:
+        original_filename = attachment.get("filename", "untitled_attachment")
+        content_type = attachment.get("mail_content_type", "")
+        payload = attachment.get("payload", "")
+
+        if not payload:
+            logger.warning(f"Attachment '{original_filename}' in {eml_path} has no payload. Skipping.")
+            continue
+
+        # We are interested in PDF and image attachments to be processed further
+        if content_type.startswith("application/pdf") or content_type.startswith("image/"):
+            try:
+                decoded_payload = base64.b64decode(payload)
+                # Sanitize filename (simple sanitization)
+                safe_filename = "".join(c if c.isalnum() or c in ('.', '_', '-') else '_' for c in original_filename)
+                if not safe_filename: # handle cases where filename becomes empty after sanitization
+                    safe_filename = f"attachment_{content_type.split('/')[-1] if '/' in content_type else 'bin'}"
+
+                attachment_save_path = attachments_output_dir / safe_filename
+                
+                # Avoid overwriting if file with same name exists by appending a number
+                counter = 1
+                temp_path = attachment_save_path
+                while temp_path.exists():
+                    name_part, ext_part = temp_path.stem, temp_path.suffix
+                    # Remove previous counter if exists to avoid names like file_1_2_3
+                    if name_part.endswith(f"_{counter-1}") and counter > 1:
+                         name_part = name_part[:-(len(str(counter-1))+1)] 
+                    temp_path = attachments_output_dir / f"{name_part}_{counter}{ext_part}"
+                    counter += 1
+                attachment_save_path = temp_path
+
+                with open(attachment_save_path, "wb") as f:
+                    f.write(decoded_payload)
+                logger.info(f"Saved attachment '{attachment_save_path.name}' from {eml_path} to {attachments_output_dir}")
+
+                # Recursively process the saved attachment
+                # Pass the 'upload_folder' which is the base for 'email_attachments'
+                attachment_info = process_uploaded_file(str(attachment_save_path), upload_folder)
+                if attachment_info and attachment_info.get('type') != 'error' and attachment_info.get('type') != 'unsupported':
+                    processed_attachments_info.append(attachment_info)
+                else:
+                    logger.warning(f"Could not process attachment '{attachment_save_path.name}' from {eml_path}. Info: {attachment_info}")
+            except base64.binascii.Error as b64e:
+                logger.error(f"Base64 decoding error for attachment '{original_filename}' in {eml_path}: {b64e}")
+            except IOError as ioe:
+                logger.error(f"IOError saving attachment '{original_filename}' from {eml_path}: {ioe}")
+            except Exception as e:
+                logger.error(f"Unexpected error processing attachment '{original_filename}' from {eml_path}: {e}", exc_info=True)
+        else:
+            logger.info(f"Skipping attachment '{original_filename}' (type: {content_type}) from {eml_path} as it's not PDF or image.")
+            
+    return {
+        'type': 'text', 
+        'content': text_content, 
+        'filename': os.path.basename(eml_path),
+        'original_filetype': 'eml', # Add this to distinguish
+        'processed_attachments': processed_attachments_info # List of dicts
+    }
+
+def process_uploaded_file(filepath: str, upload_folder: str) -> Dict[str, Any]:
     """Determines file type and calls the appropriate processing function."""
     _, ext = os.path.splitext(filepath)
     ext = ext.lower()
@@ -119,6 +207,10 @@ def process_uploaded_file(filepath: str) -> Dict[str, Any]:
         processing_function = extract_text_from_xlsx
     elif ext == '.txt':
         processing_function = extract_text_from_txt
+    elif ext == '.eml':
+        # For .eml, we need to pass the upload_folder to save attachments
+        # The functools.partial allows us to pre-fill the 'upload_folder' argument
+        processing_function = functools.partial(process_eml_file, upload_folder=upload_folder)
     else:
         logger.warning(f"Unsupported file type: {ext} for file {filepath}")
         return {'type': 'unsupported', 'filename': filename, 'message': f'Unsupported file type: {ext}'}
