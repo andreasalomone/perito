@@ -137,3 +137,5 @@ uploads/
 
 # MyPy
 .mypy_cache/ 
+
+.cursor

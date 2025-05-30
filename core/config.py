@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
     GEMINI_API_KEY: Optional[str] = None
-    FLASK_SECRET_KEY: str = "robertone"
+    FLASK_SECRET_KEY: str
     
     ALLOWED_EXTENSIONS: Set[str] = {'png', 'jpg', 'jpeg', 'xlsx', 'pdf', 'docx', 'txt', 'eml'}
     MAX_FILE_SIZE_MB: int = 25  # Maximum size for a single uploaded file in MB
