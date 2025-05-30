@@ -139,3 +139,7 @@ uploads/
 .mypy_cache/ 
 
 .cursor
+.cursor/rules
+*.mdc
+flow.md
+prd.md
