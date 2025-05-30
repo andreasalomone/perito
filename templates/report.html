@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generated Report</title>
+    <title>Perizia Generata</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
-        <h1>Generated Insurance Report</h1>
+        <h1>Perizia Generata</h1>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -21,12 +21,12 @@
         {% endwith %}
 
         <form action="{{ url_for('download_report') }}" method="post">
-            <label for="report_content">Edit Report Content (Plain Text):</label>
+            <label for="report_content">Modifica il report e/o scarica il file:</label>
             <textarea name="report_content" id="report_content">{{ report_content | default('', true) }}</textarea>
             
             <div class="button-group">
-                 <button type="button" onclick="window.location.href = {{ url_for('index')|tojson }};">Back to Upload</button>
-                <button type="submit">Download as DOCX</button>
+                 <button type="button" onclick="window.location.href = '{{ url_for('index') }}';">Torna Indietro</button>
+                <button type="submit">Scarica DOCX</button>
             </div>
         </form>
     </div>

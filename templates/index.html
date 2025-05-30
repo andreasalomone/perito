@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Insurance Report Generator</title>
+    <title>Genera una Perizia</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
         .flash-messages {
@@ -88,9 +88,9 @@
         {% endwith %}
 
         <form action="{{ url_for('upload_files') }}" method="post" enctype="multipart/form-data">
-            <label for="files">Upload Documents (PDF, DOCX, TXT, PNG, JPG, XLSX):</label>
+            <label for="files">Carica Documenti (PDF, DOCX, TXT, PNG, JPG, XLSX):</label>
             <input type="file" name="files[]" id="files" multiple required>
-            <button type="submit">Generate Report</button>
+            <button type="submit">Genera Perizia</button>
         </form>
     </div>
 
