@@ -17,11 +17,28 @@ from flask import get_flashed_messages
 import asyncio
 import sys
 
+from flask_httpauth import HTTPBasicAuth
+from werkzeug.security import generate_password_hash, check_password_hash
+
 from core.config import settings
 
 load_dotenv()
 
 app = Flask(__name__)
+auth = HTTPBasicAuth()
+
+# Define users in environment variables for security
+# In Render, set BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD
+users = {
+    os.environ.get("BASIC_AUTH_USERNAME", "admin"): generate_password_hash(os.environ.get("BASIC_AUTH_PASSWORD", "defaultpassword"))
+}
+
+@auth.verify_password
+def verify_password(username, password):
+    if username in users and \
+            check_password_hash(users.get(username), password):
+        return username
+    return None
 
 # --- Logging Configuration ---
 # Main application logging format that includes request_id
@@ -101,6 +118,13 @@ def allowed_file(filename: str) -> bool:
 def before_request_func():
     g.request_id = str(uuid.uuid4())
     logger.debug(f"Assigned request ID: {g.request_id} for {request.path}")
+
+@app.before_request
+@auth.login_required
+def protect_all_routes():
+    if request.endpoint and request.endpoint.startswith('static'):
+        return # Don't protect static files
+    pass # Let auth.login_required handle it
 
 @app.route('/')
 def index() -> str:
