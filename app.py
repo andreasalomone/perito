@@ -20,11 +20,23 @@ import sys
 from flask_httpauth import HTTPBasicAuth
 from werkzeug.security import generate_password_hash, check_password_hash
 
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
 from core.config import settings
 
 load_dotenv()
 
 app = Flask(__name__)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour", "5 per minute"],
+    storage_uri="memory://", # For single instance. For multi-instance, use Redis.
+    # RATELIMIT_STRATEGY: 'fixed-window', # or 'moving-window'
+)
+
 auth = HTTPBasicAuth()
 
 # Define users in environment variables for security
@@ -289,6 +301,7 @@ async def _process_single_file_storage(
     return processed_entries, text_length_added_by_this_file, flash_messages, successfully_saved_filename
 
 @app.route('/upload', methods=['POST'])
+@limiter.limit("10 per minute;20 per hour")
 async def upload_files() -> Union[str, FlaskResponse]:
     # Explicitly use the app's logger
     app_logger = logging.getLogger(__name__) # or app.logger
@@ -417,6 +430,7 @@ async def upload_files() -> Union[str, FlaskResponse]:
                 logger.error(f"Error removing temporary directory {temp_dir}: {e}", exc_info=True)
 
 @app.route('/download_report', methods=['POST'])
+@limiter.limit("30 per minute")
 def download_report() -> Union[FlaskResponse, Tuple[str, int]]:
     report_content: Union[str, None] = request.form.get('report_content')
     if not report_content:
