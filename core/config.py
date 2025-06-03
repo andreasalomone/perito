@@ -20,13 +20,16 @@ class Settings(BaseSettings):
     DOCX_FONT_NAME: str = "Times New Roman"
     DOCX_FONT_SIZE_NORMAL: int = 11
     DOCX_FONT_SIZE_HEADING: int = 12
-    DOCX_HEADER_TEXT: str = "Salomone & ASSOCIATI S.r.l."
     DOCX_FOOTER_TEXT_TEMPLATE: str = "Salomone & Associati S.r.l. - Pag. {page_number} di {total_pages}"
 
     # Cache Settings
     REPORT_PROMPT_CACHE_NAME: Optional[str] = None # Set this in .env to reuse a specific cache
     CACHE_TTL_DAYS: int = 30 # Time-to-live for the prompt cache in days
     CACHE_DISPLAY_NAME: str = "ReportGenerationBasePromptsV1" # Display name for new caches
+
+    LLM_API_RETRY_ATTEMPTS: int = 3 # Number of retry attempts for the LLM API call
+    LLM_API_RETRY_WAIT_SECONDS: int = 2 # Time to wait between retry attempts
+    LLM_API_TIMEOUT_SECONDS: int = 120 # Timeout for the entire generation call
 
     LOG_LEVEL: str = "INFO"
 

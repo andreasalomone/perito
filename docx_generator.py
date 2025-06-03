@@ -22,21 +22,6 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     paragraph_format = style.paragraph_format
     paragraph_format.line_spacing = 1.5
 
-    # --- Static Header Elements (as per Appendix B and config) ---
-    # To remove headers from all pages, we comment out the header creation block.
-    # header = document.sections[0].header
-    # header_paragraph = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
-    # header_run = header_paragraph.add_run(settings.DOCX_HEADER_TEXT)
-    # header_run.bold = True
-    # header_run.font.size = Pt(settings.DOCX_FONT_SIZE_HEADING)
-    # header_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    # # Add some space after header or use paragraph spacing
-    # header.add_paragraph() 
-
-    # Date and Origin (PRD Appendix B)
-    # Using a more specific date format as per typical Italian professional documents
-    document.add_paragraph() # Spacer
-
     # Recipient Address Block (PRD Appendix B) - Placeholder
     document.add_paragraph() 
 
@@ -91,11 +76,11 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     # --- Static Footer Elements with Page Numbering ---
     footer = document.sections[0].footer
     footer_paragraph = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
-    
-    # Add page number field
-    # Create a run for the left part of the footer
-    footer_run_text = footer_paragraph.add_run(settings.DOCX_FOOTER_TEXT_TEMPLATE.split('{page_number}')[0])
-    footer_run_text.font.size = Pt(9)
+    footer_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Add "Page " text
+    run = footer_paragraph.add_run("Page ")
+    run.font.size = Pt(settings.DOCX_FONT_SIZE_FOOTER if hasattr(settings, 'DOCX_FONT_SIZE_FOOTER') else 9)
 
     # Add PAGE field
     run = footer_paragraph.add_run()
@@ -112,73 +97,24 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     fldChar2.set(qn('w:fldCharType'), 'end')
     run._r.append(fldChar2)
     
-    # Add "di" and NUMPAGES field
-    text_after_page_num = ""
-    text_before_total_pages = ""
-    text_after_total_pages = ""
+    # Add " of " text
+    run = footer_paragraph.add_run(" of ")
+    run.font.size = Pt(settings.DOCX_FONT_SIZE_FOOTER if hasattr(settings, 'DOCX_FONT_SIZE_FOOTER') else 9)
 
-    if '{page_number}' in settings.DOCX_FOOTER_TEXT_TEMPLATE:
-        parts_around_page_num = settings.DOCX_FOOTER_TEXT_TEMPLATE.split('{page_number}', 1)
-        if len(parts_around_page_num) > 1:
-            text_after_page_num_part = parts_around_page_num[1]
-            if '{total_pages}' in text_after_page_num_part:
-                parts_around_total_pages = text_after_page_num_part.split('{total_pages}', 1)
-                text_before_total_pages = parts_around_total_pages[0]
-                if len(parts_around_total_pages) > 1:
-                    text_after_total_pages = parts_around_total_pages[1]
-            else:
-                text_before_total_pages = text_after_page_num_part # No total_pages, so everything after page_num is before (non-existent) total_pages
-        # If only {page_number} exists and it's at the end, text_before_total_pages remains empty
-    elif '{total_pages}' in settings.DOCX_FOOTER_TEXT_TEMPLATE: # Only {total_pages} exists
-        # This case is not directly handled by the original logic structure of adding PAGE first
-        # For simplicity, if only {total_pages} is present, we might need a different field construction
-        # Or, assume {page_number} is primary. If it's not present, complex logic for only {total_pages} is skipped by original flow.
-        pass # Current logic prioritizes {page_number}
+    # Add NUMPAGES field
+    run = footer_paragraph.add_run()
+    fldChar1_np = OxmlElement('w:fldChar')
+    fldChar1_np.set(qn('w:fldCharType'), 'begin')
+    run._r.append(fldChar1_np)
 
-    if text_before_total_pages:
-        run = footer_paragraph.add_run(text_before_total_pages)
-        run.font.size = Pt(9)
-    
-    if '{total_pages}' in settings.DOCX_FOOTER_TEXT_TEMPLATE and \
-       ('{page_number}' in settings.DOCX_FOOTER_TEXT_TEMPLATE and text_before_total_pages is not None): # Ensure total_pages is processed if it was expected
-        
-        run = footer_paragraph.add_run()
-        fldChar1 = OxmlElement('w:fldChar')
-        fldChar1.set(qn('w:fldCharType'), 'begin')
-        run._r.append(fldChar1)
+    instrText_np = OxmlElement('w:instrText')
+    instrText_np.set(qn('xml:space'), 'preserve')
+    instrText_np.text = "NUMPAGES"
+    run._r.append(instrText_np)
 
-        instrText = OxmlElement('w:instrText')
-        instrText.set(qn('xml:space'), 'preserve')
-        instrText.text = "NUMPAGES"
-        run._r.append(instrText)
-
-        fldChar2 = OxmlElement('w:fldChar')
-        fldChar2.set(qn('w:fldCharType'), 'end')
-        run._r.append(fldChar2)
-
-    if text_after_total_pages:
-        run = footer_paragraph.add_run(text_after_total_pages)
-        run.font.size = Pt(9)
-    
-    # If neither placeholder was in the template originally, but we added PAGE field, 
-    # and the original template was just static text, that static text needs to be handled.
-    # However, the first part of the template was already added before PAGE.
-    # This revised logic tries to reconstruct based on placeholders.
-    # If template had no placeholders at all, the first part (entire template) is added, then PAGE field.
-    # If it had {page_number} but not {total_pages}, then parts_around_page_num[1] is added after PAGE.
-
-    # Fallback for templates that didn't have {page_number} but might have text after where {total_pages} would be (or just static text)
-    if '{page_number}' not in settings.DOCX_FOOTER_TEXT_TEMPLATE and '{total_pages}' not in settings.DOCX_FOOTER_TEXT_TEMPLATE:
-        # The initial part of the footer (which is the whole template if no placeholders) 
-        # was already added by: footer_run_text = footer_paragraph.add_run(settings.DOCX_FOOTER_TEXT_TEMPLATE.split('{page_number}')[0])
-        # This line effectively adds the template again if no {page_number} was found. This might be redundant or handled by initial add.
-        # Let's ensure the initial add covers the whole template if no {page_number}
-        # The line `footer_run_text = footer_paragraph.add_run(settings.DOCX_FOOTER_TEXT_TEMPLATE.split('{page_number}')[0])`
-        # correctly adds the whole template if {page_number} is not present.
-        # So, no further action needed here for that case regarding the template text itself.
-        pass 
-
-    footer_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fldChar2_np = OxmlElement('w:fldChar')
+    fldChar2_np.set(qn('w:fldCharType'), 'end')
+    run._r.append(fldChar2_np)
 
     # Save to a BytesIO object
     file_stream: io.BytesIO = io.BytesIO()

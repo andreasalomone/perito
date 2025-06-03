@@ -7,8 +7,21 @@ import logging
 import asyncio
 from core.config import settings
 from core.prompt_config import PREDEFINED_STYLE_REFERENCE_TEXT, REPORT_STRUCTURE_PROMPT, SYSTEM_INSTRUCTION
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type, AsyncRetrying, RetryError
+import httpx # For timeout in native async call
 
 logger = logging.getLogger(__name__)
+
+RETRIABLE_GEMINI_EXCEPTIONS = (
+    google_exceptions.RetryError,
+    google_exceptions.ServiceUnavailable,
+    google_exceptions.DeadlineExceeded, # Often means timeout, can be retried
+    google_exceptions.InternalServerError, # 500 errors from Google
+    google_exceptions.Aborted,
+    httpx.ReadTimeout, # For async calls
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+)
 
 
 async def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
@@ -31,8 +44,16 @@ async def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
             if not existing_cache_name.startswith("cachedContents/"):
                 cache_name_for_get = f"cachedContents/{existing_cache_name}"
             
-            # Use asyncio.to_thread for blocking call
-            cache = await asyncio.to_thread(client.caches.get, name=cache_name_for_get)
+            @retry(
+                stop=stop_after_attempt(settings.LLM_API_RETRY_ATTEMPTS),
+                wait=wait_fixed(settings.LLM_API_RETRY_WAIT_SECONDS),
+                retry=retry_if_exception_type(RETRIABLE_GEMINI_EXCEPTIONS),
+                reraise=True
+            )
+            def _get_cache_with_retry():
+                return client.caches.get(name=cache_name_for_get)
+
+            cache = await asyncio.to_thread(_get_cache_with_retry)
             # Basic validation: check if it's for the same model and not expired (implicitly, get succeeds)
             if cache.model.endswith(settings.LLM_MODEL_NAME): # Model name in cache includes 'models/' prefix
                 logger.info(f"Successfully retrieved and validated existing cache: {cache.name}")
@@ -44,6 +65,8 @@ async def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
                 )
         except google_exceptions.NotFound:
             logger.warning(f"Existing cache {existing_cache_name} not found. Will create a new one.")
+        except RetryError as re: # Catch tenacity's RetryError after attempts exhausted
+            logger.error(f"Failed to retrieve cache {existing_cache_name} after multiple retries: {re}. Will attempt to create a new one.", exc_info=True)
         except Exception as e:
             logger.error(f"Error retrieving cache {existing_cache_name}: {e}. Will attempt to create a new one.", exc_info=True)
 
@@ -69,17 +92,23 @@ async def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
             if model_id_for_creation.startswith("models/"):
                  model_id_for_creation = model_id_for_creation.split("/")[-1]
 
-            # Use asyncio.to_thread for blocking call
-            new_cache = await asyncio.to_thread(
-                client.caches.create,
-                model=model_id_for_creation, # Use the raw model ID here
-                config={
-                    'contents': cached_content_parts, # Use the Content objects with roles
-                    'system_instruction': types.Content(parts=[types.Part(text=SYSTEM_INSTRUCTION)], role="system"), # System instruction should have role "system"
-                    'ttl': ttl_string,
-                    'display_name': settings.CACHE_DISPLAY_NAME
-                }
+            @retry(
+                stop=stop_after_attempt(settings.LLM_API_RETRY_ATTEMPTS),
+                wait=wait_fixed(settings.LLM_API_RETRY_WAIT_SECONDS),
+                retry=retry_if_exception_type(RETRIABLE_GEMINI_EXCEPTIONS),
+                reraise=True
             )
+            def _create_cache_with_retry():
+                return client.caches.create(
+                    model=model_id_for_creation, # Use the raw model ID here
+                    config={
+                        'contents': cached_content_parts, # Use the Content objects with roles
+                        'system_instruction': types.Content(parts=[types.Part(text=SYSTEM_INSTRUCTION)], role="system"), # System instruction should have role "system"
+                        'ttl': ttl_string,
+                        'display_name': settings.CACHE_DISPLAY_NAME
+                    }
+                )
+            new_cache = await asyncio.to_thread(_create_cache_with_retry)
             active_cache_name = new_cache.name
             logger.info(f"Successfully created new cache: {active_cache_name} with TTL: {ttl_string}")
             
@@ -88,6 +117,9 @@ async def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
             logger.info(
                 f'To reuse this cache in future runs, set the environment variable REPORT_PROMPT_CACHE_NAME="{log_cache_name}"'
             )
+        except RetryError as re:
+            logger.error(f"Failed to create new prompt cache after multiple retries: {re}", exc_info=True)
+            return None # Or return LLMGenerationResult with error
         except Exception as e:
             logger.error(f"Failed to create new prompt cache: {e}", exc_info=True)
             return None
@@ -131,32 +163,46 @@ async def generate_report_from_content(
         for file_info in processed_files:
             if file_info.get('type') == 'vision':
                 file_path = file_info.get('path')
-                mime_type = file_info.get('mime_type')
+                mime_type_from_info = file_info.get('mime_type')
                 display_name = file_info.get('filename', os.path.basename(file_path) if file_path else "uploaded_file")
-                if not file_path or not mime_type:
+                if not file_path or not mime_type_from_info:
                     logger.warning(f"Skipping vision file due to missing path or mime_type: {file_info}")
                     continue
                 
-                async def _upload_one_vision_file(fp: str, display_name: str) -> Union[types.File, None]:
+                async def _upload_one_vision_file(fp: str, display_name: str, mime_type: str) -> Union[types.File, None]:
                     """Uploads a single file for vision processing to Gemini, handling potential errors."""
                     try:
                         logger.debug(f"Attempting to upload file {display_name} from path: {fp} to Gemini.")
                         # Corrected keyword from 'path' to 'file' based on recent SDK versions
                         upload_config = types.UploadFileConfig(
                             display_name=display_name,
+                            mime_type=mime_type,
                             # You might need to set other fields like mime_type if not automatically detected
                             # mime_type="image/jpeg" # or "application/pdf", etc.
                         )
-                        uploaded_file = await asyncio.to_thread(
-                            client.files.upload, file=fp, config=upload_config 
+
+                        @retry(
+                            stop=stop_after_attempt(settings.LLM_API_RETRY_ATTEMPTS),
+                            wait=wait_fixed(settings.LLM_API_RETRY_WAIT_SECONDS),
+                            retry=retry_if_exception_type(RETRIABLE_GEMINI_EXCEPTIONS),
+                            reraise=True
                         )
+                        def _upload_file_with_retry():
+                            # Note: The client.files.upload might have its own timeout.
+                            # We are adding retries around it.
+                            return client.files.upload(file=fp, config=upload_config)
+
+                        uploaded_file = await asyncio.to_thread(_upload_file_with_retry)
                         logger.debug(f"Successfully uploaded file {display_name} (URI: {uploaded_file.uri}) to Gemini.")
                         return uploaded_file
+                    except RetryError as re:
+                        logger.error(f"Failed to upload file {display_name} to Gemini after multiple retries: {re}", exc_info=True)
+                        return None
                     except Exception as e:
                         logger.error(f"Failed to upload file {display_name} to Gemini: {e}", exc_info=True)
                         return None
 
-                upload_coroutines.append(_upload_one_vision_file(file_path, display_name))
+                upload_coroutines.append(_upload_one_vision_file(file_path, display_name, mime_type_from_info))
             
             elif file_info.get('type') == 'text':
                 filename = file_info.get('filename', 'documento testuale')
@@ -237,12 +283,37 @@ async def generate_report_from_content(
         # logger.debug(f"Prompt parts being sent: {final_prompt_parts}") 
 
         # Use client.aio.models.generate_content for async call
-        response = await client.aio.models.generate_content(
-            model=settings.LLM_MODEL_NAME,
-            contents=final_prompt_parts, 
-            config=final_config
-        )
+        response = None
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(settings.LLM_API_RETRY_ATTEMPTS),
+                wait=wait_fixed(settings.LLM_API_RETRY_WAIT_SECONDS),
+                retry=retry_if_exception_type(RETRIABLE_GEMINI_EXCEPTIONS),
+                reraise=True
+            ):
+                with attempt:
+                    logger.debug(f"Calling Gemini generate_content (attempt {attempt.retry_state.attempt_number})...")
+                    response = await asyncio.wait_for(
+                        client.aio.models.generate_content(
+                            model=settings.LLM_MODEL_NAME,
+                            contents=final_prompt_parts, 
+                            config=final_config
+                        ),
+                        timeout=settings.LLM_API_TIMEOUT_SECONDS
+                    )
+        except RetryError as re:
+            logger.error(f"Failed to generate content after multiple retries: {re}", exc_info=True)
+            return f"Error: LLM API failed after {settings.LLM_API_RETRY_ATTEMPTS} retries: {str(re)}"
+        except asyncio.TimeoutError:
+            logger.error(f"LLM content generation timed out after {settings.LLM_API_TIMEOUT_SECONDS} seconds.", exc_info=True)
+            return f"Error: LLM content generation timed out after {settings.LLM_API_TIMEOUT_SECONDS} seconds."
+        # The broad try-except in generate_report_from_content will catch other google_exceptions.GoogleAPIError or general Exception.
+        # No need to re-raise here unless for specific intermediate handling not required by the prompt.
         
+        if response is None: # Should ideally be caught by exceptions above, but as a safeguard
+            logger.error("LLM response is None after generation attempts, possibly due to unhandled retry/timeout scenario.")
+            return "Error: LLM response was unexpectedly None after generation attempts."
+
         report_content: str = ""
         
         try:
@@ -308,12 +379,24 @@ async def generate_report_from_content(
             async def _delete_one_file(name_to_delete: str):
                 try:
                     logger.debug(f"Attempting to delete uploaded file {name_to_delete} from Gemini File Service.")
-                    await asyncio.to_thread(client.files.delete, name=name_to_delete)
+                    @retry(
+                        stop=stop_after_attempt(settings.LLM_API_RETRY_ATTEMPTS),
+                        wait=wait_fixed(settings.LLM_API_RETRY_WAIT_SECONDS),
+                        retry=retry_if_exception_type(RETRIABLE_GEMINI_EXCEPTIONS),
+                        reraise=True
+                    )
+                    def _delete_file_with_retry():
+                        client.files.delete(name=name_to_delete)
+
+                    await asyncio.to_thread(_delete_file_with_retry)
                     logger.debug(f"Successfully deleted file {name_to_delete} from Gemini File Service.")
                     return True, name_to_delete
                 except google_exceptions.NotFound:
                     logger.warning(f"File {name_to_delete} not found for deletion, or already deleted.", exc_info=False)
                     return False, name_to_delete # Indicate failure but not critical error
+                except RetryError as re:
+                    logger.error(f"Failed to delete file {name_to_delete} from Gemini after multiple retries: {re}", exc_info=True)
+                    return False, name_to_delete
                 except Exception as e:
                     logger.error(f"Failed to delete file {name_to_delete} from Gemini: {e}", exc_info=True)
                     return False, name_to_delete # Indicate failure
