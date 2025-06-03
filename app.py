@@ -15,6 +15,7 @@ import io
 import uuid
 from flask import get_flashed_messages
 import asyncio
+import sys
 
 from core.config import settings
 
@@ -23,23 +24,56 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- Logging Configuration ---
+# Main application logging format that includes request_id
+main_log_format = '%(asctime)s - %(levelname)s - %(name)s - %(request_id)s - %(message)s'
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
-                    format='%(asctime)s - %(levelname)s - %(name)s - %(request_id)s - %(message)s')
+                    format=main_log_format) # Apply main format globally first
+
+# Specific logger for startup messages, potentially before request_id is meaningful or filter is fully active
+logger_for_startup = logging.getLogger("hypercorn_startup_test")
+# If this logger only logs at startup, it might not need/have request_id.
+# To avoid errors, give it a simple handler and formatter if it logs before the filter is guaranteed.
+if not logger_for_startup.handlers: # Add a specific handler if none exist (e.g. in some environments)
+    startup_handler = logging.StreamHandler(sys.stderr) # Log to stderr
+    startup_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s') # No request_id
+    startup_handler.setFormatter(startup_formatter)
+    logger_for_startup.addHandler(startup_handler)
+    logger_for_startup.propagate = False # Don't pass to root if we have a specific handler
+
+logger_for_startup.info("Flask application starting up / reloaded by Hypercorn (via dedicated startup logger).")
+
+# Configure httpx logger to be less verbose
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 class RequestIdFilter(logging.Filter):
     def filter(self, record):
+        # Print directly to stderr to avoid recursion and bypass logging system for this debug
+        # print(f"RequestIdFilter: ENTERED. Filtering record for logger '{record.name}'. Message: '{record.getMessage()[:70]}...'", file=sys.stderr)
+        
+        effective_request_id = 'N/A_FILTER_DEFAULT_INIT' 
         try:
-            # Attempt to get request_id from Flask's g object
-            # g is only available in a request context
-            record.request_id = g.get('request_id', 'N/A')
+            # g is imported at module level 'from flask import g'
+            # Accessing g.get() outside of app/request context should raise RuntimeError
+            # print(f"RequestIdFilter: DEBUG Attempting g.get for '{record.name}'", file=sys.stderr)
+            effective_request_id = g.get('request_id', 'N/A_FROM_G_GET_WITH_DEFAULT')
+            # print(f"RequestIdFilter: DEBUG g.get succeeded for '{record.name}', effective_request_id: {effective_request_id}", file=sys.stderr)
         except RuntimeError:
-            # This occurs if logging happens outside of an app context (e.g. startup)
-            # or request context.
-            record.request_id = 'N/A_OUTSIDE_REQUEST'
+            effective_request_id = 'N/A_RUNTIME_ERROR'
+            # print(f"RequestIdFilter: DEBUG RuntimeError for '{record.name}'", file=sys.stderr)
+        except NameError:
+            # This should ideally not happen if 'from flask import g' at module level is successful
+            effective_request_id = 'N/A_NAME_ERROR_G_NOT_FOUND'
+            # print(f"RequestIdFilter: DEBUG NameError for '{record.name}'", file=sys.stderr)
+        except Exception as e:
+            # Catch any other unexpected exception during g.get() or related operations
+            effective_request_id = f'N/A_UNEXPECTED_FILTER_ERR_{type(e).__name__}'
+            # print(f"RequestIdFilter: DEBUG Unexpected Exception '{type(e).__name__}' for '{record.name}': {e}", file=sys.stderr)
+        
+        record.request_id = effective_request_id
+        # print(f"RequestIdFilter: FINISHED. Set record.request_id to '{record.request_id}' for logger '{record.name}'", file=sys.stderr)
         return True
 
 logger = logging.getLogger(__name__)
-# logger.addFilter(RequestIdFilter()) # This is now handled by applying to root handlers
 
 # Apply the filter to all handlers of the root logger
 # This ensures that any logger (including Werkzeug's, if it uses the root handlers)
@@ -66,9 +100,11 @@ def allowed_file(filename: str) -> bool:
 @app.before_request
 def before_request_func():
     g.request_id = str(uuid.uuid4())
+    logger.debug(f"Assigned request ID: {g.request_id} for {request.path}")
 
 @app.route('/')
 def index() -> str:
+    logger.info(f"Accessing index route /. Request ID: {g.get('request_id', 'N/A_index')}")
     return render_template('index.html')
 
 # Helper Functions for upload_files
@@ -126,6 +162,8 @@ async def _process_single_file_storage(
     current_total_extracted_text_length: int
 ) -> Tuple[List[Dict[str, Any]], int, List[Tuple[str, str]], Optional[str]]:
     """Processes a single FileStorage object, returning processed data, new text length, flash messages, and filename."""
+    # Ensure g.request_id is available here if needed for deep logging
+    # logger.debug(f"Processing single file. Request ID: {g.get('request_id', 'N/A_process_single')}")
     processed_entries: List[Dict[str, Any]] = []
     text_length_added_by_this_file = 0
     flash_messages: List[Tuple[str, str]] = []
@@ -221,19 +259,30 @@ async def _process_single_file_storage(
 
     except Exception as e:
         logger.error(f"Error saving or processing file {filename}: {e}", exc_info=True)
-        flash_messages.append((f"Error processing file {filename}. It has been skipped.", "error"))
-        processed_entries.append({'type': 'error', 'filename': filename, 'message': f'Error saving/processing: {e}'})
+        flash_messages.append((f"An unexpected error occurred while processing file {filename}. It has been skipped. Please check logs for details.", "error"))
+        processed_entries.append({'type': 'error', 'filename': filename, 'message': 'An unexpected error occurred during processing. Please see logs.'})
 
     return processed_entries, text_length_added_by_this_file, flash_messages, successfully_saved_filename
 
 @app.route('/upload', methods=['POST'])
 async def upload_files() -> Union[str, FlaskResponse]:
+    # Explicitly use the app's logger
+    app_logger = logging.getLogger(__name__) # or app.logger
+    app_logger.info(f"!!!!!!!!!!!!!! ENTERED /upload route. Request ID: {g.get('request_id', 'N/A_upload_entry')} !!!!!!!!!!!!!!")
+    app_logger.debug(f"Request Method: {request.method}")
+    app_logger.debug(f"Request Headers: {list(request.headers)}") # Convert to list for better logging
+    app_logger.debug(f"Request Form Data: {request.form.to_dict()}") # Convert to dict
+    app_logger.debug(f"Request Files: {request.files.to_dict()}") # Convert to dict
+
     if 'files[]' not in request.files:
-        logger.warning("File part missing in request.")
+        app_logger.warning(f"!!!!!!!!!!!!!! File part 'files[]' missing in request. Request ID: {g.get('request_id', 'N/A_upload_no_files_part')} !!!!!!!!!!!!!!")
         flash("No file part in the request. Please select files to upload.", "error")
-        return redirect(request.url)
+        # It's generally better to redirect to a GET route, like the index page, after a POST error.
+        # return redirect(request.url) # request.url would be '/upload'
+        return redirect(url_for('index'))
 
     files: List[FileStorage] = request.files.getlist('files[]')
+    app_logger.info(f"!!!!!!!!!!!!!! Files received in 'files[]': {[f.filename for f in files]}. Request ID: {g.get('request_id', 'N/A_upload_files_list')} !!!!!!!!!!!!!!")
 
     validation_error = _validate_file_list(files)
     if validation_error:
@@ -266,8 +315,13 @@ async def upload_files() -> Union[str, FlaskResponse]:
         temp_dir = tempfile.mkdtemp()
         logger.info(f"Created temporary directory: {temp_dir}")
 
+        logger.info(f"Starting processing of {len(files)} files. Request ID: {g.get('request_id', 'N/A_upload_processing_start')}")
+        num_successful_processing = 0
+        num_failed_processing = 0
+
         for file_storage in files:
             if not file_storage or not file_storage.filename: # Skip empty/invalid FileStorage objects
+                num_failed_processing += 1
                 continue
             
             # Individual file size check
@@ -285,6 +339,7 @@ async def upload_files() -> Union[str, FlaskResponse]:
                     'filename': file_storage.filename,
                     'message': f'File exceeds size limit of {settings.MAX_FILE_SIZE_MB} MB'
                 })
+                num_failed_processing += 1
                 continue
             
             # Call the helper for actual processing
@@ -299,14 +354,21 @@ async def upload_files() -> Union[str, FlaskResponse]:
                 flash(fm[0], fm[1])
             if saved_fname:
                 uploaded_filenames_for_display.append(saved_fname)
+                num_successful_processing += 1
+            else: # Implies an error occurred within _process_single_file_storage or was unsupported
+                # Check if already counted as error due to size limit
+                was_size_error = any(entry.get('filename') == file_storage.filename and 'File exceeds size limit' in entry.get('message', '') for entry in processed_file_data)
+                if not was_size_error: # Avoid double counting if already handled by size check
+                    num_failed_processing += 1
+
+        logger.info(f"Finished processing files. {num_successful_processing} succeeded, {num_failed_processing} failed. Request ID: {g.get('request_id', 'N/A_upload_processing_end')}")
 
         if not processed_file_data and not uploaded_filenames_for_display:
-             logger.warning("No files were processed or saved. All might have been skipped due to size/type or were invalid.")
+             logger.warning("No files were suitable for processing after filtering. All might have been skipped due to size/type or were invalid.")
              flash("No files were suitable for processing.", "warning")
              return redirect(request.url)
 
-        report_content: str = await asyncio.to_thread(
-            llm_handler.generate_report_from_content,
+        report_content: str = await llm_handler.generate_report_from_content(
             processed_files=processed_file_data,
             additional_text=""
         )
@@ -329,7 +391,6 @@ async def upload_files() -> Union[str, FlaskResponse]:
                 logger.info(f"Successfully removed temporary directory: {temp_dir}")
             except Exception as e:
                 logger.error(f"Error removing temporary directory {temp_dir}: {e}", exc_info=True)
-    return "Error during cleanup or unexpected exit", 500
 
 @app.route('/download_report', methods=['POST'])
 def download_report() -> Union[FlaskResponse, Tuple[str, int]]:

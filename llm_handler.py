@@ -2,15 +2,16 @@ import os
 from google import genai
 from google.genai import types
 from google.api_core import exceptions as google_exceptions
-from typing import Dict, Any, List, Union, Optional
+from typing import Dict, Any, List, Union, Optional, Tuple
 import logging
+import asyncio
 from core.config import settings
 from core.prompt_config import PREDEFINED_STYLE_REFERENCE_TEXT, REPORT_STRUCTURE_PROMPT, SYSTEM_INSTRUCTION
 
 logger = logging.getLogger(__name__)
 
 
-def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
+async def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
     """Retries an existing prompt cache or creates a new one.
 
     Checks for a cache name in settings. If found, tries to retrieve it.
@@ -30,7 +31,8 @@ def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
             if not existing_cache_name.startswith("cachedContents/"):
                 cache_name_for_get = f"cachedContents/{existing_cache_name}"
             
-            cache = client.caches.get(name=cache_name_for_get)
+            # Use asyncio.to_thread for blocking call
+            cache = await asyncio.to_thread(client.caches.get, name=cache_name_for_get)
             # Basic validation: check if it's for the same model and not expired (implicitly, get succeeds)
             if cache.model.endswith(settings.LLM_MODEL_NAME): # Model name in cache includes 'models/' prefix
                 logger.info(f"Successfully retrieved and validated existing cache: {cache.name}")
@@ -67,8 +69,9 @@ def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
             if model_id_for_creation.startswith("models/"):
                  model_id_for_creation = model_id_for_creation.split("/")[-1]
 
-
-            new_cache = client.caches.create(
+            # Use asyncio.to_thread for blocking call
+            new_cache = await asyncio.to_thread(
+                client.caches.create,
                 model=model_id_for_creation, # Use the raw model ID here
                 config={
                     'contents': cached_content_parts, # Use the Content objects with roles
@@ -92,7 +95,7 @@ def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
     return active_cache_name
 
 
-def generate_report_from_content(
+async def generate_report_from_content(
     processed_files: List[Dict[str, Any]],
     additional_text: str = ""
 ) -> str:
@@ -108,7 +111,7 @@ def generate_report_from_content(
     active_cache_name_for_generation: Optional[str] = None
 
     try:
-        active_cache_name_for_generation = _get_or_create_prompt_cache(client)
+        active_cache_name_for_generation = await _get_or_create_prompt_cache(client)
 
         if not active_cache_name_for_generation:
             logger.warning("Proceeding with report generation without prompt caching due to an issue.")
@@ -122,6 +125,9 @@ def generate_report_from_content(
                 "\n\n"
             ])
 
+        upload_coroutines = []
+        processed_text_files_parts = []
+
         for file_info in processed_files:
             if file_info.get('type') == 'vision':
                 file_path = file_info.get('path')
@@ -130,32 +136,64 @@ def generate_report_from_content(
                 if not file_path or not mime_type:
                     logger.warning(f"Skipping vision file due to missing path or mime_type: {file_info}")
                     continue
-                try:
-                    logger.info(f"Uploading {display_name} ({mime_type}) to Gemini File Service...")
-                    # The new SDK uses client.files.upload(path=...) and path should be a string.
-                    upload_config = types.UploadFileConfig(mime_type=mime_type, display_name=display_name)
-                    uploaded_file = client.files.upload(file=file_path, config=upload_config) # Ensure file_path is string
-                    uploaded_file_objects.append(uploaded_file)
-                    temp_uploaded_file_names_for_api.append(uploaded_file.name)
-                    logger.info(f"Successfully uploaded {display_name} as {uploaded_file.name}")
-                except Exception as e:
-                    logger.error(f"Failed to upload file {display_name} to Gemini: {e}", exc_info=True)
-                    final_prompt_parts.append(f"\n\n[AVVISO: Il file {display_name} non ha potuto essere caricato per l'analisi.]\n\n")
+                
+                async def _upload_one_vision_file(fp: str, display_name: str) -> Union[types.File, None]:
+                    """Uploads a single file for vision processing to Gemini, handling potential errors."""
+                    try:
+                        logger.debug(f"Attempting to upload file {display_name} from path: {fp} to Gemini.")
+                        # Corrected keyword from 'path' to 'file' based on recent SDK versions
+                        upload_config = types.UploadFileConfig(
+                            display_name=display_name,
+                            # You might need to set other fields like mime_type if not automatically detected
+                            # mime_type="image/jpeg" # or "application/pdf", etc.
+                        )
+                        uploaded_file = await asyncio.to_thread(
+                            client.files.upload, file=fp, config=upload_config 
+                        )
+                        logger.debug(f"Successfully uploaded file {display_name} (URI: {uploaded_file.uri}) to Gemini.")
+                        return uploaded_file
+                    except Exception as e:
+                        logger.error(f"Failed to upload file {display_name} to Gemini: {e}", exc_info=True)
+                        return None
+
+                upload_coroutines.append(_upload_one_vision_file(file_path, display_name))
+            
             elif file_info.get('type') == 'text':
                 filename = file_info.get('filename', 'documento testuale')
                 content = file_info.get('content', '')
                 if content:
-                    final_prompt_parts.append(f"--- INIZIO CONTENUTO DA FILE: {filename} ---\n")
-                    final_prompt_parts.append(content)
-                    final_prompt_parts.append(f"\n--- FINE CONTENUTO DA FILE: {filename} ---\n\n")
+                    processed_text_files_parts.append(f"--- INIZIO CONTENUTO DA FILE: {filename} ---\n")
+                    processed_text_files_parts.append(content)
+                    processed_text_files_parts.append(f"\n--- FINE CONTENUTO DA FILE: {filename} ---\n\n")
             elif file_info.get('type') == 'error':
                 filename = file_info.get('filename', 'file sconosciuto')
                 message = file_info.get('message', 'errore generico')
-                final_prompt_parts.append(f"\n\n[AVVISO: Problema durante l'elaborazione del file {filename}: {message}]\n\n")
+                processed_text_files_parts.append(f"\n\n[AVVISO: Problema durante l'elaborazione del file {filename}: {message}]\n\n")
             elif file_info.get('type') == 'unsupported':
                 filename = file_info.get('filename', 'file sconosciuto')
                 message = file_info.get('message', 'tipo non supportato')
-                final_prompt_parts.append(f"\n\n[AVVISO: Il file {filename} è di un tipo non supportato e non può essere processato: {message}]\n\n")
+                processed_text_files_parts.append(f"\n\n[AVVISO: Il file {filename} è di un tipo non supportato e non può essere processato: {message}]\n\n")
+
+        if upload_coroutines:
+            logger.info(f"Starting upload of {len(upload_coroutines)} vision files to Gemini.")
+            upload_results = await asyncio.gather(*upload_coroutines, return_exceptions=False) # return_exceptions=False handled in _upload_one_vision_file
+            successful_uploads = 0
+            failed_uploads = 0
+            for result in upload_results:
+                if isinstance(result, types.File):
+                    uploaded_file_objects.append(result)
+                    temp_uploaded_file_names_for_api.append(result.name)
+                    successful_uploads += 1
+                elif isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], Exception):
+                    display_name, _ = result # Exception already logged in _upload_one_vision_file
+                    final_prompt_parts.append(f"\n\n[AVVISO: Il file {display_name} non ha potuto essere caricato per l'analisi.]\n\n")
+                    failed_uploads +=1
+                else: # Should ideally not happen if _upload_one_vision_file returns File or None (which implies error logged)
+                    logger.warning(f"Unexpected result type from _upload_one_vision_file: {type(result)}. Counting as failed upload.")
+                    failed_uploads += 1
+            logger.info(f"Finished uploading vision files to Gemini. {successful_uploads} succeeded, {failed_uploads} failed.")
+        
+        final_prompt_parts.extend(processed_text_files_parts) # Add text file parts after vision processing
 
         if additional_text.strip():
             final_prompt_parts.append(f"--- INIZIO TESTO AGGIUNTIVO FORNITO ---\n{additional_text}\n--- FINE TESTO AGGIUNTIVO FORNITO ---\n")
@@ -198,7 +236,8 @@ def generate_report_from_content(
         # For brevity in logs, don't log full final_prompt_parts if it's very large.
         # logger.debug(f"Prompt parts being sent: {final_prompt_parts}") 
 
-        response = client.models.generate_content(
+        # Use client.aio.models.generate_content for async call
+        response = await client.aio.models.generate_content(
             model=settings.LLM_MODEL_NAME,
             contents=final_prompt_parts, 
             config=final_config
@@ -219,10 +258,14 @@ def generate_report_from_content(
                 if parts_text:
                     report_content = "".join(parts_text)
         except AttributeError as e:
-            logger.warning(f"AttributeError while accessing response text or parts: {e}. Full response: {response}")
+            logger.warning(f"AttributeError while accessing response text or parts: {e}.", exc_info=True)
+            # Log the full response separately if needed for debugging, but don't include in common path
+            # logger.debug(f"Full response object on AttributeError: {response}")
 
         if not report_content:
-            logger.warning(f"Gemini response did not yield usable text content. Full response: {response}")
+            logger.warning(f"Gemini response did not yield usable text content.")
+            # Log the full response separately if needed for debugging
+            # logger.debug(f"Full response object when no usable text: {response}")
             if response.prompt_feedback and response.prompt_feedback.block_reason:
                 block_reason_obj = response.prompt_feedback.block_reason
                 block_reason_name = block_reason_obj.name if hasattr(block_reason_obj, 'name') else str(block_reason_obj)
@@ -258,28 +301,49 @@ def generate_report_from_content(
         logger.error(f"An unexpected error occurred with the Gemini service: {e}", exc_info=True)
         return f"Error generating report due to an unexpected LLM issue: {str(e)}"
     finally:
-        for file_api_name in temp_uploaded_file_names_for_api:
-            try:
-                logger.info(f"Deleting uploaded file {file_api_name} from Gemini File Service...")
-                client.files.delete(name=file_api_name)
-                logger.info(f"Successfully deleted {file_api_name}.")
-            except Exception as e_del:
-                logger.error(f"Failed to delete file {file_api_name} from Gemini: {e_del}", exc_info=True)
+        if temp_uploaded_file_names_for_api:
+            logger.info(f"Cleaning up {len(temp_uploaded_file_names_for_api)} uploaded files from Gemini File Service.")
+            delete_tasks = []
+
+            async def _delete_one_file(name_to_delete: str):
+                try:
+                    logger.debug(f"Attempting to delete uploaded file {name_to_delete} from Gemini File Service.")
+                    await asyncio.to_thread(client.files.delete, name=name_to_delete)
+                    logger.debug(f"Successfully deleted file {name_to_delete} from Gemini File Service.")
+                    return True, name_to_delete
+                except google_exceptions.NotFound:
+                    logger.warning(f"File {name_to_delete} not found for deletion, or already deleted.", exc_info=False)
+                    return False, name_to_delete # Indicate failure but not critical error
+                except Exception as e:
+                    logger.error(f"Failed to delete file {name_to_delete} from Gemini: {e}", exc_info=True)
+                    return False, name_to_delete # Indicate failure
+
+            for name_to_delete in temp_uploaded_file_names_for_api:
+                delete_tasks.append(_delete_one_file(name_to_delete))
+            
+            if delete_tasks:
+                logger.info(f"Starting deletion of {len(delete_tasks)} files from Gemini File Service.")
+                delete_results = await asyncio.gather(*delete_tasks)
+                successful_deletions = sum(1 for success, _ in delete_results if success)
+                failed_deletions = len(delete_results) - successful_deletions
+                logger.info(f"Finished deleting files from Gemini. {successful_deletions} deleted, {failed_deletions} failed or not found.")
+
+    return "Error: An unexpected issue occurred before report content could be determined."
 
 
 # Example of how you might want to initialize or check the cache at startup 
 # (e.g., in your app.py or a main script)
-# def ensure_prompt_cache_exists():
+# async def ensure_prompt_cache_exists(): # Would need to be async
 #     if not settings.GEMINI_API_KEY:
 #         logger.warning("Cannot ensure prompt cache: GEMINI_API_KEY not set.")
 #         return
 #     try:
 #        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-#        cache_name = _get_or_create_prompt_cache(client)
+#        cache_name = await _get_or_create_prompt_cache(client) # await async call
 #        if cache_name:
 #            logger.info(f"Prompt cache is active: {cache_name}")
 #            # Optionally, you could try to update settings.REPORT_PROMPT_CACHE_NAME here
-#            # if it was newly created and not set in .env, though that's harder to persist back to .env
+#            # if it was newly created and not set in .env, though that\'s harder to persist back to .env
 #        else:
 #            logger.error("Failed to ensure prompt cache is active.")
 #     except Exception as e:
@@ -288,32 +352,34 @@ def generate_report_from_content(
 # if __name__ == '__main__':
 #     # This is just for testing the cache creation/retrieval logic directly
 #     # In a real app, this would be part of your application's startup sequence or first request.
-#     logging.basicConfig(level=logging.INFO)
-#     # Ensure you have GEMINI_API_KEY in your .env or environment
-#     # And optionally REPORT_PROMPT_CACHE_NAME set to an existing cache ID
-#     if not settings.GEMINI_API_KEY:
-#         print("Please set GEMINI_API_KEY in your .env file to test caching.")
-#     else:
-#         print(f"GEMINI_API_KEY found. Model for caching: {settings.LLM_MODEL_NAME}")
-#         print(f"Configured CACHE_TTL_DAYS: {settings.CACHE_TTL_DAYS}")
-#         print(f"Configured CACHE_DISPLAY_NAME: {settings.CACHE_DISPLAY_NAME}")
-#         print(f"Current REPORT_PROMPT_CACHE_NAME from env (if any): {settings.REPORT_PROMPT_CACHE_NAME}")
-        
-#         test_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-#         active_cache = _get_or_create_prompt_cache(test_client)
-#         if active_cache:
-#             print(f"Test successful. Active cache name: {active_cache}")
-#             print(f"Try setting REPORT_PROMPT_CACHE_NAME='{active_cache}' in your .env file for the next run.")
-            
-#             # Test retrieving it again to simulate next run with env var set
-#             # For this test to work, you'd manually set the env var for the next line if it was just created.
-#             # Or, if settings.REPORT_PROMPT_CACHE_NAME was already set and valid, this confirms retrieval.
-#             # settings.REPORT_PROMPT_CACHE_NAME = active_cache # Simulate it being set for the next call
-#             # print("\nAttempting to retrieve the cache again...")
-#             # retrieved_again = _get_or_create_prompt_cache(test_client)
-#             # if retrieved_again == active_cache:
-#             #     print(f"Second retrieval successful: {retrieved_again}")
-#             # else:
-#             #     print(f"Second retrieval failed or got a different cache: {retrieved_again}")
+#     async def main_test(): # Main test function would need to be async
+#         logging.basicConfig(level=logging.INFO)
+#         # Ensure you have GEMINI_API_KEY in your .env or environment
+#         # And optionally REPORT_PROMPT_CACHE_NAME set to an existing cache ID
+#         if not settings.GEMINI_API_KEY:
+#             print("Please set GEMINI_API_KEY in your .env file to test caching.")
 #         else:
-#             print("Test failed to get or create cache.") 
+#             print(f"GEMINI_API_KEY found. Model for caching: {settings.LLM_MODEL_NAME}")
+#             print(f"Configured CACHE_TTL_DAYS: {settings.CACHE_TTL_DAYS}")
+#             print(f"Configured CACHE_DISPLAY_NAME: {settings.CACHE_DISPLAY_NAME}")
+#             print(f"Current REPORT_PROMPT_CACHE_NAME from env (if any): {settings.REPORT_PROMPT_CACHE_NAME}")
+            
+#             test_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+#             active_cache = await _get_or_create_prompt_cache(test_client) # await async call
+#             if active_cache:
+#                 print(f"Test successful. Active cache name: {active_cache}")
+#                 print(f"Try setting REPORT_PROMPT_CACHE_NAME='{active_cache.replace('cachedContents/', '')}' in your .env file for the next run.")
+                
+#                 # Test retrieving it again to simulate next run with env var set
+#                 # For this test to work, you'd manually set the env var for the next line if it was just created.
+#                 # Or, if settings.REPORT_PROMPT_CACHE_NAME was already set and valid, this confirms retrieval.
+#                 # settings.REPORT_PROMPT_CACHE_NAME = active_cache # Simulate it being set for the next call
+#                 # print("\nAttempting to retrieve the cache again...")
+#                 # retrieved_again = await _get_or_create_prompt_cache(test_client) # await async call
+#                 # if retrieved_again == active_cache:
+#                 #     print(f"Second retrieval successful: {retrieved_again}")
+#                 # else:
+#                 #     print(f"Second retrieval failed or got a different cache: {retrieved_again}")
+#             else:
+#                 print("Test failed to get or create cache.")
+#     asyncio.run(main_test()) # Run the async main test function 

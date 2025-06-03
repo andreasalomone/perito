@@ -111,7 +111,7 @@ def test_upload_total_files_exceed_size_limit(mock_settings, client):
 @mock.patch('app.tempfile.mkdtemp')
 @mock.patch('app.shutil.rmtree')
 @mock.patch('app.document_processor.process_uploaded_file')
-@mock.patch('app.llm_handler.generate_report_from_content')
+@mock.patch('app.llm_handler.generate_report_from_content', new_callable=mock.AsyncMock)
 @mock.patch('app.settings') # Mock settings for general limits not being hit
 def test_upload_successful_flow(
     mock_app_settings,
@@ -163,7 +163,7 @@ def test_upload_successful_flow(
 @mock.patch('app.tempfile.mkdtemp')
 @mock.patch('app.shutil.rmtree')
 @mock.patch('app.document_processor.process_uploaded_file')
-@mock.patch('app.llm_handler.generate_report_from_content')
+@mock.patch('app.llm_handler.generate_report_from_content', new_callable=mock.AsyncMock)
 @mock.patch('app.settings')
 def test_upload_text_truncation(
     mock_app_settings,
@@ -217,7 +217,7 @@ def test_upload_text_truncation(
 @mock.patch('app.tempfile.mkdtemp')
 @mock.patch('app.shutil.rmtree')
 @mock.patch('app.document_processor.process_uploaded_file')
-@mock.patch('app.llm_handler.generate_report_from_content')
+@mock.patch('app.llm_handler.generate_report_from_content', new_callable=mock.AsyncMock)
 @mock.patch('app.settings')
 def test_upload_eml_processing(
     mock_app_settings,
