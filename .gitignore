@@ -143,3 +143,20 @@ uploads/
 *.mdc
 flow.md
 prd.md
+
+# Additions based on user request to ensure comprehensive .gitignore
+
+# Python
+share/python-wheels/
+
+# Secrets (Note: .env is already present in the 'Environments' section)
+*.env
+.env.*
+!.env.example
+
+# IDE / Editor generic temp files
+*.swp
+*.swo
+
+# Test & Coverage
+cov_html/
