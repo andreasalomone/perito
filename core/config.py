@@ -18,9 +18,9 @@ class Settings(BaseSettings):
 
     # DOCX Generation Settings
     DOCX_FONT_NAME: str = "Times New Roman"
-    DOCX_FONT_SIZE_NORMAL: int = 11
+    DOCX_FONT_SIZE_NORMAL: int = 12
     DOCX_FONT_SIZE_HEADING: int = 12
-    DOCX_LINE_SPACING: float = 1.15
+    DOCX_LINE_SPACING: float = 1.5
     DOCX_SPACE_AFTER_PARAGRAPH: int = 6 # Punti di spazio dopo un paragrafo standard
 
     # Cache Settings

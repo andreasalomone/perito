@@ -100,10 +100,12 @@ SCHEMA_REPORT: str = """
 
 **BLOCCO INTESTAZIONE INIZIALE (DA GENERARE PRIMA DI TUTTO):**
 
-[Riga 1: Nome completo della società cliente. ES: Spett.le UNIPOL SAI S.p.A.]
-[Riga 2: Indirizzo completo della società cliente. ES: Via V Dicembre, 3]
-[Riga 3: CAP Città (Provincia) della società cliente. ES: 16121 Genova]
-(NOTA LLM: Genera queste 3 righe esattamente in questo formato, una per riga. Il `docx_generator.py` le allineerà a destra.)
+[Riga 1: Metti solo: Spett.le] 
+[Riga 2: Nome completo della società cliente. ES: Spett.le UNIPOL SAI S.p.A.]
+[Riga 3: Indirizzo completo della società cliente. ES: Via V Dicembre, 3]
+[Riga 4: CAP Città (Provincia) della società cliente. ES: 16121 Genova]
+[Riga 5: Metti solo: -------------------------------------]
+(NOTA LLM: Genera queste 5 righe esattamente in questo formato, una per riga. Il `docx_generator.py` le allineerà a destra.)
 
 \n\n
 (NOTA LLM: Lascia una riga vuota qui sopra, ottenuta con `\n\n`, prima del blocco Luogo/Data)
@@ -115,10 +117,10 @@ SCHEMA_REPORT: str = """
 (NOTA LLM: Lascia una riga vuota qui sopra, ottenuta con `\n\n`, prima del blocco Riferimenti)
 
 **BLOCCO RIFERIMENTI (FORMATTAZIONE IMPORTANTE):**
-(NOTA LLM: Genera ogni riferimento su una nuova riga. Allinea i due punti ":" usando spazi, se possibile, per un aspetto pulito. Il `docx_generator.py` applicherà un font leggermente più piccolo.)
-Vs. Rif.        : [Riferimento fornito dal cliente. Se non reperibile, usa: N.D.]
-Polizza         : [Numero polizza merci. Se non reperibile, usa: N.D.]
-Ns. Rif.        : [Riferimento interno perito. Formato tipico XXX/YY. Se non reperibile, usa: N.D.]
+(NOTA LLM: Genera ogni riferimento su una nuova riga. Allinea i due punti ":" usando spazi, se possibile, per un aspetto pulito. Aggiungi • davanti come vedi sott. Il `docx_generator.py` applicherà un font leggermente più piccolo.)
+• Vs. Rif.        : [Riferimento fornito dal cliente. Se non reperibile, usa: N.D.]
+• Polizza         : [Numero polizza merci. Se non reperibile, usa: N.D.]
+• Ns. Rif.        : [Riferimento interno perito. Formato tipico XXX/YY. Se non reperibile, usa: N.D.]
 
 \n\n
 (NOTA LLM: Lascia una riga vuota qui sopra, ottenuta con `\n\n`, prima dell'Oggetto)
@@ -139,6 +141,7 @@ A seguito del gradito incarico ricevuto in data [Data incarico GG/MM/AAAA], abbi
 1 – DATI GENERALI
 
 (NOTA LLM: Per i campi sotto "DATI GENERALI", genera l'etichetta poi il valore. Formatta ogni punto per renderlo più leggibile.)
+(Dopo che hai finito i valori per un'etichetta, lascia una riga vuota prima di passare all'etichetta successiva, ottenuta con `\n\n`)
 
 Dettaglio spedizione:
 [Spedizione totale: ES: 60 colli, 10,000 pezzi]

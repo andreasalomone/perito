@@ -80,7 +80,7 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     font.name = settings.DOCX_FONT_NAME
     font.size = Pt(settings.DOCX_FONT_SIZE_NORMAL)
     paragraph_format = style.paragraph_format
-    paragraph_format.line_spacing = settings.DOCX_LINE_SPACING if hasattr(settings, 'DOCX_LINE_SPACING') else 1.15
+    paragraph_format.line_spacing = settings.DOCX_LINE_SPACING if hasattr(settings, 'DOCX_LINE_SPACING') else 1.5
     paragraph_format.space_before = Pt(0)
     paragraph_format.space_after = Pt(settings.DOCX_SPACE_AFTER_PARAGRAPH if hasattr(settings, 'DOCX_SPACE_AFTER_PARAGRAPH') else 6)
 
@@ -183,7 +183,8 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
             fmt.line_spacing = 1.0
             # Potresti voler un font leggermente più piccolo per questi, come nel PDF
             for run in p.runs:
-                run.font.size = Pt(settings.DOCX_FONT_SIZE_NORMAL - 1) # Es. 10pt se normale è 11pt
+                run.font.size = Pt(settings.DOCX_FONT_SIZE_NORMAL) # Es. 10pt se normale è 11pt
+                run.bold = True # Make reference lines bold
             if is_first_content_paragraph_after_initial_blocks:
                 fmt.space_before = Pt(6) # Spazio prima del blocco riferimenti
                 is_first_content_paragraph_after_initial_blocks = False
@@ -214,7 +215,7 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
             table.columns[0].width = col0_width
             table.columns[1].width = col1_width
             
-            remove_table_borders(table) # Rendi i bordi invisibili
+            # remove_table_borders(table) # Rendi i bordi invisibili
 
             cell_label = table.cell(0, 0)
             para_label = cell_label.paragraphs[0]
@@ -323,7 +324,7 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     # La prima cella conterrà il testo statico, la seconda il numero di pagina
     footer_table = footer.add_table(rows=1, cols=2, width=Inches(content_area_width_inches))
     footer_table.autofit = False
-    remove_table_borders(footer_table) # Bordi invisibili
+    # remove_table_borders(footer_table) # Bordi invisibili
 
     # Calcola larghezze colonne footer
     # Rendiamo la colonna del numero pagina più stretta
@@ -353,19 +354,20 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
         
     for run in p_text1.runs:
         run.font.name = settings.DOCX_FONT_NAME
-        run.font.size = Pt(7) # Font piccolo per footer
+        run.font.size = Pt(12) # Font piccolo per footer
     p_text1.alignment = WD_ALIGN_PARAGRAPH.LEFT
     p_text1.paragraph_format.space_before = Pt(0)
     p_text1.paragraph_format.space_after = Pt(0)
     p_text1.paragraph_format.line_spacing = 1.0
 
     # Paragrafo 2 del testo statico (nella stessa cella)
+    p_text2.alignment = WD_ALIGN_PARAGRAPH.LEFT
     p_text2 = cell_text.add_paragraph()
     # Non c'è "BN Surveys Srls" nella seconda riga del footer come da tuo esempio
     p_text2.add_run(footer_static_text_line2)
     for run in p_text2.runs:
         run.font.name = settings.DOCX_FONT_NAME
-        run.font.size = Pt(7)
+        run.font.size = Pt(12)
     p_text2.alignment = WD_ALIGN_PARAGRAPH.LEFT
     p_text2.paragraph_format.space_before = Pt(0)
     p_text2.paragraph_format.space_after = Pt(0)
@@ -385,7 +387,7 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     
     run_page = p_page_num.add_run()
     run_page.font.name = settings.DOCX_FONT_NAME
-    run_page.font.size = Pt(9) # Come da PDF
+    run_page.font.size = Pt(12) # Come da PDF
     
     fldChar_begin = OxmlElement('w:fldChar')
     fldChar_begin.set(qn('w:fldCharType'), 'begin')
@@ -399,7 +401,7 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     run_page._r.append(instrText)
     run_page._r.append(fldChar_end)
     
-    cell_page_num.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.BOTTOM # Allinea in basso
+    cell_page_num.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP # Allinea in alto
 
 
     # Salva in un oggetto BytesIO
