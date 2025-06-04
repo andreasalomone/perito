@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, Response as FlaskResponse, flash, redirect, url_for, g
+from flask import Flask, render_template, request, send_file, Response as FlaskResponse, flash, redirect, url_for, g, current_app, session
 import os
 import logging
 import tempfile
@@ -121,6 +121,10 @@ for handler in logging.root.handlers:
 
 app.config['SECRET_KEY'] = settings.FLASK_SECRET_KEY
 app.config['MAX_CONTENT_LENGTH'] = settings.MAX_TOTAL_UPLOAD_SIZE_BYTES
+
+# Define a directory for storing generated reports temporarily
+REPORTS_DIR = os.path.join(tempfile.gettempdir(), 'generated_reports_data')
+os.makedirs(REPORTS_DIR, exist_ok=True)
 
 def allowed_file(filename: str) -> bool:
     return '.' in filename and \
@@ -403,7 +407,7 @@ async def upload_files() -> Union[str, FlaskResponse]:
         if not processed_file_data and not uploaded_filenames_for_display:
              logger.warning("No files were suitable for processing after filtering. All might have been skipped due to size/type or were invalid.")
              flash("No files were suitable for processing.", "warning")
-             return redirect(request.url)
+             return redirect(url_for('index'))
 
         report_content: str = await llm_handler.generate_report_from_content(
             processed_files=processed_file_data,
@@ -413,8 +417,31 @@ async def upload_files() -> Union[str, FlaskResponse]:
         if not report_content or report_content.strip().startswith("ERROR:"):
             logger.error(f"LLM Error: {report_content}")
             flash(f"Could not generate report: {report_content}", "error")
-            return render_template('index.html', filenames=uploaded_filenames_for_display) 
+            return render_template('index.html', filenames=uploaded_filenames_for_display)
 
+        # Store the generated report content in a temporary file
+        report_id = str(uuid.uuid4())
+        report_filename = f"{report_id}.txt"
+        report_filepath = os.path.join(REPORTS_DIR, report_filename)
+        
+        try:
+            # Ensure REPORTS_DIR exists (though it's created at startup, good to double-check or ensure it if app might run in different contexts)
+            os.makedirs(REPORTS_DIR, exist_ok=True)
+            with open(report_filepath, 'w', encoding='utf-8') as f:
+                f.write(report_content)
+            logger.info(f"Saved generated report to temporary file: {report_filepath}")
+            session['report_file_id'] = report_id # Store only the ID in the session
+            # If company_name is determined, it should be set here, e.g.:
+            # session['company_name'] = determined_company_name 
+        except IOError as e:
+            logger.error(f"Failed to save report content to {report_filepath}: {e}", exc_info=True)
+            flash("Error saving report data for download. Please try again.", "error")
+            # Still attempt to render the report for viewing if saving failed.
+            # The download button might not work, but user can see content.
+            return render_template('report.html', report_content=report_content, filenames=uploaded_filenames_for_display, save_error=True)
+
+        # Pass the original report_content for display on the current page
+        # The session cookie will only contain the report_file_id, not the large content.
         return render_template('report.html', report_content=report_content, filenames=uploaded_filenames_for_display)
 
     except Exception as e:
@@ -432,24 +459,78 @@ async def upload_files() -> Union[str, FlaskResponse]:
 @app.route('/download_report', methods=['POST'])
 @limiter.limit("30 per minute")
 def download_report() -> Union[FlaskResponse, Tuple[str, int]]:
-    report_content: Union[str, None] = request.form.get('report_content')
-    if not report_content:
-        return "Error: No report content to download.", 400
+    current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Attempting to download report. Session active: {True if session else False}")
 
     try:
-        file_stream: io.BytesIO = docx_generator.create_styled_docx(report_content)
-        timestamp: str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        download_filename: str = f"Insurance_Report_{timestamp}.docx"
+        report_file_id = session.get('report_file_id')
+        current_app.logger.debug(f"{g.get('request_id', 'N/A_download_report')} - Retrieved report_file_id from session: {report_file_id}")
+
+        if not report_file_id:
+            current_app.logger.error(f"{g.get('request_id', 'N/A_download_report')} - Report file ID is missing in session.")
+            flash("Il contenuto del report non è disponibile per il download (ID mancante). Per favore, rigenera il report.", "error")
+            return redirect(url_for('index'))
+
+        report_filename_for_read = f"{report_file_id}.txt"
+        report_filepath = os.path.join(REPORTS_DIR, report_filename_for_read)
+        current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Attempting to read report from: {report_filepath}")
+
+        try:
+            with open(report_filepath, 'r', encoding='utf-8') as f:
+                report_content_from_file = f.read()
+            current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Successfully read report content from: {report_filepath}")
+        except FileNotFoundError:
+            current_app.logger.error(f"{g.get('request_id', 'N/A_download_report')} - Report file not found: {report_filepath}")
+            flash("Il file del report non è stato trovato sul server. Potrebbe essere scaduto o eliminato. Per favore, rigenera il report.", "error")
+            return redirect(url_for('index'))
+        except IOError as e:
+            current_app.logger.error(f"Error reading report file {report_filepath}: {e}", exc_info=True)
+            flash("Errore durante la lettura dei dati del report dal server. Per favore, riprova.", "error")
+            return redirect(url_for('index'))
         
+        # Log il tipo e il valore di report_content PRIMA della conversione o controllo
+        # This log was for the old session-based content, now we use report_content_from_file
+        current_app.logger.debug(f"{g.get('request_id', 'N/A_download_report')} - Report content from file for DOCX: '{report_content_from_file[:100]}...' (Type: {type(report_content_from_file)})")
+
+        if not report_content_from_file: # Handles empty string from file
+            current_app.logger.error(f"{g.get('request_id', 'N/A_download_report')} - Report content from file is empty.")
+            flash("Il contenuto del report recuperato è vuoto. Per favore, rigenera il report.", "error")
+            return redirect(url_for('index'))
+        
+        # Ensure report_content_from_file is a string (it should be, from file read)
+        if not isinstance(report_content_from_file, str):
+            current_app.logger.error(f"{g.get('request_id', 'N/A_download_report')} - report_content_from_file is not a string. Type: {type(report_content_from_file)}.")
+            flash("Errore interno: il formato del contenuto del report (da file) non è valido. Contatta l'assistenza.", "error")
+            return redirect(url_for('index'))
+
+        current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Generating DOCX for content starting with: '{report_content_from_file[:100]}...'")
+        file_stream: io.BytesIO = docx_generator.create_styled_docx(report_content_from_file)
+        
+        # Sanitize filename
+        # Use session.get for company_name as before, it might be set by other logic or default to 'report'
+        clean_company_name = "".join(c if c.isalnum() or c in " -" else "_" for c in session.get('company_name', 'report'))
+        download_display_filename = f"Perizia_{clean_company_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+        
+        # Optional: Clean up the temporary file after successful DOCX generation and sending.
+        # Consider a more robust cleanup strategy (e.g., a scheduled job) for files not cleaned up due to errors.
+        # For now, we can attempt a cleanup here.
+        try:
+            os.remove(report_filepath)
+            current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Successfully removed temporary report file after DOCX generation: {report_filepath}")
+        except OSError as e:
+            current_app.logger.error(f"Error removing temporary report file {report_filepath} after DOCX generation: {e}")
+
+
         return send_file(
             file_stream,
             as_attachment=True,
-            download_name=download_filename,
+            download_name=download_display_filename,
             mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         )
     except Exception as e:
         logger.error(f"Error generating DOCX: {e}", exc_info=True)
-        return f"Error generating DOCX: An unexpected error occurred.", 500
+        # Send a more user-friendly error message if possible, or a generic one.
+        flash(f"Errore durante la generazione del file DOCX: {str(e)}", "error")
+        return redirect(url_for('index')) # Redirect to index on error
 
 if __name__ == '__main__':
     app.run(debug=True) 

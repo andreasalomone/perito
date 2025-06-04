@@ -160,3 +160,8 @@ share/python-wheels/
 
 # Test & Coverage
 cov_html/
+
+#Legacy Files
+legacy/
+
+pytest.ini

@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Union, Optional, Tuple
 import logging
 import asyncio
 from core.config import settings
-from core.prompt_config import PREDEFINED_STYLE_REFERENCE_TEXT, REPORT_STRUCTURE_PROMPT, SYSTEM_INSTRUCTION
+from core.prompt_config import GUIDA_STILE_TERMINOLOGIA_ED_ESEMPI, SCHEMA_REPORT, SYSTEM_INSTRUCTION
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type, AsyncRetrying, RetryError
 import httpx # For timeout in native async call
 
@@ -78,8 +78,8 @@ async def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
             # or 'model' if it's meant to be a pre-fill of a model's response.
             # Given these are instructions and reference texts, 'user' seems appropriate.
             cached_content_parts = [
-                types.Content(parts=[types.Part(text=PREDEFINED_STYLE_REFERENCE_TEXT)], role="user"),
-                types.Content(parts=[types.Part(text=REPORT_STRUCTURE_PROMPT)], role="user"),
+                types.Content(parts=[types.Part(text=GUIDA_STILE_TERMINOLOGIA_ED_ESEMPI)], role="user"),
+                types.Content(parts=[types.Part(text=SCHEMA_REPORT)], role="user"),
             ]
             
             ttl_seconds = settings.CACHE_TTL_DAYS * 24 * 60 * 60
@@ -149,9 +149,9 @@ async def generate_report_from_content(
             logger.warning("Proceeding with report generation without prompt caching due to an issue.")
             # Fallback: Include prompts directly if caching failed
             final_prompt_parts.extend([
-                PREDEFINED_STYLE_REFERENCE_TEXT,
+                GUIDA_STILE_TERMINOLOGIA_ED_ESEMPI,
                 "\n\n",
-                REPORT_STRUCTURE_PROMPT,
+                SCHEMA_REPORT,
                 "\n\n",
                 SYSTEM_INSTRUCTION, # Add system instruction if not using cache where it's embedded
                 "\n\n"
@@ -248,7 +248,7 @@ async def generate_report_from_content(
         # These are `types.File` objects, which the API handles as references to uploaded content.
         final_prompt_parts.extend(uploaded_file_objects)
         
-        final_instruction = "\n\nAnalizza TUTTI i documenti e testi forniti (sia quelli caricati come file referenziati, sia quelli inclusi direttamente come testo) e genera il report." 
+        final_instruction = "\n\nAnalizza TUTTI i documenti, foto e testi forniti (sia quelli caricati come file referenziati, sia quelli inclusi direttamente come testo) e genera il report." 
         if active_cache_name_for_generation:
             final_instruction += " Utilizza le istruzioni di stile, struttura e sistema precedentemente cachate."
         else:
