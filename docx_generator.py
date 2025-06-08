@@ -361,7 +361,6 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     p_text1.paragraph_format.line_spacing = 1.0
 
     # Paragrafo 2 del testo statico (nella stessa cella)
-    p_text2.alignment = WD_ALIGN_PARAGRAPH.LEFT
     p_text2 = cell_text.add_paragraph()
     # Non c'è "BN Surveys Srls" nella seconda riga del footer come da tuo esempio
     p_text2.add_run(footer_static_text_line2)
