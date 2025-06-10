@@ -53,18 +53,39 @@ A seguito del gradito incarico ricevuto in data [Data incarico GG/MM/AAAA], abbi
 
 1 – DATI GENERALI
 
-(NOTA LLM: Per i campi sotto, genera l'etichetta seguita dai due punti (:) e poi dal valore. Se un valore si estende su più righe, metti l'etichetta e i due punti solo sulla prima riga. Le righe successive di quel valore devono iniziare senza etichetta.)
-(Dopo che hai finito i valori per un'etichetta, lascia una riga vuota prima di passare all'etichetta successiva, ottenuta con `\n\n`)
+(NOTA LLM: Per i campi di questa sezione, segui queste regole di formattazione con la massima precisione. Sono critiche per la corretta interpretazione dei dati.)
+
+1.  **FORMATO ETICHETTA-VALORE:** Ogni campo deve avere la forma `Etichetta: Valore`. Il carattere dei due punti (`:`) va usato **SOLO E SOLTANTO** per separare l'etichetta dal suo valore.
+
+2.  **DIVIETO ASSOLUTO DI `:` NEL VALORE:** Non inserire **MAI** il carattere dei due punti (`:`) all'interno del testo di un valore. Se un dettaglio contiene naturalmente i due punti, riformula la frase per ometterli (es. "Descrizione Dettaglio" invece di "Descrizione: Dettaglio").
+
+3.  **VALORI SU PIÙ RIGHE (ELENCHI):** Se un valore è composto da un elenco di item (es. un dettaglio di colli, una lista di indirizzi), formatta in questo modo:
+    *   La prima riga contiene `Etichetta: [Descrizione generale se presente]`.
+    *   Ogni item successivo va su una nuova riga, iniziando con un trattino (`-`) seguito da uno spazio. **NON** usare i due punti in queste righe.
+
+4.  **SPAZIATURA TRA CAMPI:** Lascia sempre una riga vuota (ottenuta con `\n\n`) tra un campo e il successivo (es. tra `Mittente` e `Destinatario`).
+
+**ESEMPIO CORRETTO:**
+Dettaglio spedizione: 129 capi d'abbigliamento (polo e shirts)
+- Collo 1 con 29 capi
+- Collo 2 con 6 capi
+- Collo 3 con 23 capi
+
+**ESEMPIO ERRATO (DA EVITARE ASSOLUTAMENTE):**
+Dettaglio spedizione: 129 capi
+Collo 1: 29 capi  <-- ERRATO: contiene ':' nel valore.
+Collo 2: 6 capi  <-- ERRATO: non inizia con '-' e contiene ':'.
+
 (IMPORTANTE: Inizia l'intera sezione sempre con il marker [INIZIO_DATI_GENERALI], e finisci sempre con il marker [FINE_DATI_GENERALI].)
-(IMPORTANTE: Gli unici ":" che inserirai all'interno di questa sezione (1 – DATI GENERALI) saranno quelli dopo l'etichetta (es. "Dettaglio spedizione:", "Mittente:", etc. ), come vedi dalla struttura, mai nel valore. Invece di inserire ":" per righe del valore dopo l'etichetta, lascia bianco. ES: Dettagli Spedizione: "- Colle 371b 34 maglie" = va bene, "- Colle 371b: 34 maglie" = non va bene.)
+(IMPORTANTE: Gli unici ":" che inserirai all'interno di questa sezione (1 – DATI GENERALI) saranno quelli dopo l'etichetta (es. "Dettaglio spedizione:", "Mittente:", etc. ).
 
 Struttura:
 
 [INIZIO_DATI_GENERALI]
-Dettaglio spedizione:[Spedizione totale: ES: 60 colli, 10,050 pezzi]
-[Primo item della spedizione: ES: 0,53 pallet Bio Cavolfiore filmato 4 pz]
-[Secondo item: ES: 1 pallet Rucola 10 x 100 g]
-[Terzo item: ES: 1,5 pallet Bio Valeriana]
+Dettaglio spedizione:[Spedizione totale: ES, 60 colli, 10,050 pezzi]
+[Primo item della spedizione: ES, 0,53 pallet Bio Cavolfiore filmato 4 pz]
+[Secondo item: ES, 1 pallet Rucola 10 x 100 g]
+[Terzo item: ES, 1,5 pallet Bio Valeriana]
 [E così via dettagliatamente per tutti gli item, uno per riga...]
 
 Peso totale merce trasportata:Lordo kg. [Peso lordo GG.GGG,GG. Estrai.]
@@ -88,16 +109,17 @@ Vettore:[Nome completo società vettore]
 [Indirizzo completo vettore]
 [CAP Città (Provincia, Nazione vettore)]
 
-Targa automezzo:[Targa/e veicolo/i. ES: Trattore: AA123BB - Semirimorchio: XY456ZW. Se non applicabile: N.D. o identificativo mezzo es. VOLO 9876 Air France, o Nave "Splendida" della Moby]
+Targa automezzo:[Targa/e veicolo/i. ES: Trattore AA123BB - Semirimorchio XY456ZW. Se non applicabile: N.D. o identificativo mezzo es. VOLO 9876 Air France, o Nave "Splendida" della Moby]
 
-Trazionista:[Nome completo società trazionista. Se Vettore: Come Vettore. Se N.D.: N.D.]
+Trazionista:[Nome completo società trazionista. Se Vettore = Come Vettore. Se N.D.: N.D.]
 [Indirizzo trazionista]
 [CAP Città (Nazione trazionista)]
 
 Autista:[Nome Cognome conducente. Se N.D.: N.D.]
 
 Data e luogo perizia:[Data/e perizia GG/MM/AAAA]
-[Nome società e indirizzo completo luogo perizia]wxyz[CAP Città (Nazione luogo perizia)]
+[Nome società e indirizzo completo luogo perizia]
+[CAP Città (Nazione luogo perizia)]
 [FINE_DATI_GENERALI]
 
 (NOTA LLM: Includi solo i campi rilevanti per la perizia in oggetto, omettendo quelli non applicabili o non presenti nei documenti.)
