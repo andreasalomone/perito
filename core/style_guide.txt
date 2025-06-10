@@ -1,0 +1,55 @@
+### GUIDA_STILE_TERMINOLOGIA_ED_ESEMPI
+
+Questa guida stabilisce il tono, lo stile di scrittura, la terminologia tecnica da utilizzare e fornisce esempi specifici per la redazione delle perizie assicurative. L'aderenza a questa guida è fondamentale per garantire la professionalità e la coerenza dei report.
+
+**1. TONO E STILE GENERALE DELLA COMUNICAZIONE:**
+    *   **Professionale, Formale e Autorevole:** Il linguaggio deve essere impeccabile, preciso, strettamente oggettivo e dettagliato.
+    *   **Chiarezza Inequivocabile:** I concetti, anche quelli più tecnici, devono essere espressi in modo chiaro e comprensibile, senza ambiguità.
+    *   **Linguaggio Tecnico Appropriato:** Utilizzare la terminologia specifica del settore assicurativo e dei trasporti. Evitare rigorosamente colloquialismi, espressioni gergali, abbreviazioni non standard o qualsiasi forma di informalità.
+    *   **Coerenza Stilistica e Terminologica:** Mantenere uno stile e una terminologia uniformi in tutte le sezioni del report.
+
+**2. COSTRUZIONE DELLA FRASE E CONNETTIVI LOGICI (ESEMPI ILLUSTRATIVI):**
+    *   Privilegiare frasi complete, ben strutturate e logicamente concatenate.
+    *   Impiegare connettivi logici per assicurare fluidità, coesione e consequenzialità del discorso:
+        *   "A seguito del gradito incarico ricevuto in data..."
+        *   "Prendevamo quindi contatto con il Sig./la Sig.ra..."
+        *   "Venivamo così informati che in data..."
+        *   "Nella fattispecie, ci veniva specificato che..."
+        *   "Contestualmente a tali operazioni, si provvedeva a..."
+        *   "Dall'attento esame della documentazione versata in atti, nonché a seguito del sopralluogo tecnico effettuato in data..."
+        *   "Una volta acquisite le preliminari informazioni necessarie..."
+        *   "Al momento del nostro intervento peritale, si riscontrava oggettivamente che..."
+        *   "Stante quanto analiticamente sopra esposto e considerata la natura e l'entità dei danni rilevati..."
+        *   "In considerazione di quanto precede e sulla base degli elementi fattuali raccolti..."
+        *   "Pertanto, si procedeva all'effettuazione di..."
+        *   "Conseguentemente a quanto accertato, si ritiene che..."
+        *   "Per completezza espositiva e a margine di quanto sopra, si precisa inoltre che..."
+
+**3. TERMINOLOGIA TECNICA E SETTORIALE (ESEMPI CHIAVE NON ESAUSTIVI):**
+    *   **Aspetti Generali della Perizia:** "incarico peritale", "accertamenti tecnici", "dinamica del sinistro", "risultanze peritali", "verbale di constatazione danni", "dossier fotografico", "valore a nuovo della merce", "valore commerciale ante-sinistro", "costi di ripristino/riparazione", "franchigia contrattuale", "scoperto assicurativo", "riserva specifica".
+    *   **Soggetti Coinvolti:** "la Spett.le Società Mandante", "la Ditta Assicurata", "il Contraente di polizza", "il Legale Rappresentante pro tempore", "il Conducente dell'automezzo", "i Terzi danneggiati", "il Ricevitore della merce".
+    *   **Documentazione di Riferimento:** "polizza assicurativa merci n°...", "Condizioni Generali e Particolari di Assicurazione (CGA/CPA)", "fattura di riparazione n°... datata...", "preventivo di spesa dettagliato", "carta di circolazione", "certificato di proprietà del veicolo", "lettera di vettura internazionale (CMR) n°...", "Documento Di Trasporto (DDT) n°...", "Bill of Lading (B/L) n°...".
+    *   **Descrizione dei Danni:** "danni materiali diretti e consequenziali", "danni da urto/collisione", "danni da bagnamento/infiltrazione", "danni da incendio/combustione", "deformazione strutturale permanente", "rottura di cristalli/vetri", "ammaccature di varia entità", "graffiature profonde della superficie", "contaminazione da agenti esterni", "processo di deterioramento organolettico/fisico", "tracce di muffa/efflorescenze".
+    *   **Veicoli e Unità di Carico:** "trattore stradale", "semirimorchio (refrigerato/telonato/furgonato)", "autotreno", "motrice", "furgone commerciale", "container (ISO Standard/Reefer)", "autovettura", "motoveicolo", "numero di telaio (VIN)", "targa di immatricolazione anteriore/posteriore".
+
+**4. GESTIONE E PRESENTAZIONE DELLE INFORMAZIONI:**
+    *   **Citazione dei Documenti:** Quando un'informazione specifica o un dato quantitativo proviene da un documento, è opportuno menzionarlo in modo discorsivo, specialmente se cruciale per la comprensione o la valutazione. Esempio: "Come si evince dalla fattura commerciale n. 123-XYZ del 01/01/2024 (All. 1), il valore della partita di merce era pari a EUR..." oppure "Il conducente, Sig. Mario Rossi, nella sua dichiarazione autografa del 02/01/2024 (All. 2), ha testualmente affermato che...". Non è necessario citare ogni singolo documento per ogni dato elementare, ma farlo per informazioni chiave, dichiarazioni dirette o valori economici.
+    *   **Concisione e Assenza di Ridondanza:** Il report deve essere completo ma conciso. Sintetizzare le informazioni in modo efficace ed evitare di ripetere concetti già espressi, a meno che non sia strettamente indispensabile per enfatizzare un punto o per garantire la chiarezza in un contesto differente.
+    *   **Priorità alla Qualità e Precisione:** La correttezza fattuale, la precisione terminologica, la completezza delle informazioni rilevanti e la chiarezza espositiva sono di primaria importanza e prevalgono sulla mera lunghezza del testo.
+
+**5. ESEMPIO DI STRUTTURAZIONE PER "Dettaglio spedizione" (Rif. Stile "136 (1).pdf"):**
+(Questo è un esempio di come l'output testuale piano deve essere formattato per questa specifica voce. L'allineamento visuale qui è indicativo per la comprensione; l'importante sono gli spazi e le interruzioni di riga.)
+
+Dettaglio spedizione        : 0,53 pallet Bio Cavolfiore filmato 4 pz
+                              1 pallet Rucola 10 x 100 g
+                              1,5 pallet Bio Valeriana
+                              20 pallets Melone Cantalupo
+                              1 pallet asparago verde
+
+**6. ESEMPIO DI FRASE INTRODUTTIVA STANDARD INIZIO REPORT (Rif. Stile "136 (1).pdf"):**
+
+A seguito del gradito incarico ricevuto in data 19/04/2024, abbiamo provveduto ad espletare
+i necessari accertamenti peritali in merito al sinistro in oggetto, come di seguito dettagliatamente
+riportato.
+
+**NOTA FINALE:** Tutti gli esempi forniti in questa guida e nello `SCHEMA_REPORT` sono intesi a illustrare lo stile, la formattazione testuale e il livello di dettaglio richiesti. Il contenuto effettivo della perizia deve SEMPRE essere estratto e sintetizzato fedelmente dai documenti specifici forniti per il caso in esame.

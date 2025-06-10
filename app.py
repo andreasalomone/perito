@@ -16,6 +16,7 @@ import uuid
 from flask import get_flashed_messages
 import asyncio
 import sys
+import click
 
 from flask_httpauth import HTTPBasicAuth
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -24,10 +25,39 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from core.config import settings
+from admin.routes import admin_bp
+from core.database import db
+from core.models import ReportLog, DocumentLog, ReportStatus
 
 load_dotenv()
 
 app = Flask(__name__)
+
+# --- App Configuration ---
+# It's crucial to set a secret key for session management, used by the admin panel.
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'a_default_fallback_secret_key')
+app.config['SECRET_KEY'] = settings.FLASK_SECRET_KEY
+app.config['MAX_CONTENT_LENGTH'] = settings.MAX_TOTAL_UPLOAD_SIZE_BYTES
+
+# --- Database Configuration ---
+# Production check: Use DATABASE_URL from environment if available (for Render/Heroku),
+# otherwise fall back to local SQLite for development.
+database_uri = os.environ.get('DATABASE_URL')
+if database_uri:
+    # Ensure the URI uses the 'postgresql+psycopg' dialect to use the modern driver.
+    if database_uri.startswith("postgres://"):
+        database_uri = database_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif database_uri.startswith("postgresql://"):
+        database_uri = database_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = database_uri or f"sqlite:///{os.path.join(app.instance_path, 'project.db')}"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize extensions
+db.init_app(app)
+
+# Register the admin blueprint
+app.register_blueprint(admin_bp)
 
 limiter = Limiter(
     get_remote_address,
@@ -119,9 +149,6 @@ for handler in logging.root.handlers:
 
 # --- End Logging Configuration ---
 
-app.config['SECRET_KEY'] = settings.FLASK_SECRET_KEY
-app.config['MAX_CONTENT_LENGTH'] = settings.MAX_TOTAL_UPLOAD_SIZE_BYTES
-
 # Define a directory for storing generated reports temporarily
 REPORTS_DIR = os.path.join(tempfile.gettempdir(), 'generated_reports_data')
 os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -135,14 +162,8 @@ def before_request_func():
     g.request_id = str(uuid.uuid4())
     logger.debug(f"Assigned request ID: {g.request_id} for {request.path}")
 
-@app.before_request
-@auth.login_required
-def protect_all_routes():
-    if request.endpoint and request.endpoint.startswith('static'):
-        return # Don't protect static files
-    pass # Let auth.login_required handle it
-
 @app.route('/')
+@auth.login_required
 def index() -> str:
     logger.info(f"Accessing index route /. Request ID: {g.get('request_id', 'N/A_index')}")
     return render_template('index.html')
@@ -306,33 +327,36 @@ async def _process_single_file_storage(
 
 @app.route('/upload', methods=['POST'])
 @limiter.limit("10 per minute;20 per hour")
+@auth.login_required
 async def upload_files() -> Union[str, FlaskResponse]:
-    # Explicitly use the app's logger
-    app_logger = logging.getLogger(__name__) # or app.logger
-    app_logger.info(f"!!!!!!!!!!!!!! ENTERED /upload route. Request ID: {g.get('request_id', 'N/A_upload_entry')} !!!!!!!!!!!!!!")
-    app_logger.debug(f"Request Method: {request.method}")
-    app_logger.debug(f"Request Headers: {list(request.headers)}") # Convert to list for better logging
-    app_logger.debug(f"Request Form Data: {request.form.to_dict()}") # Convert to dict
-    app_logger.debug(f"Request Files: {request.files.to_dict()}") # Convert to dict
+    app_logger = logging.getLogger(__name__)
+    app_logger.info(f"Entered /upload route. Request ID: {g.get('request_id', 'N/A_upload_entry')}")
+
+    # Step 1: Create a new ReportLog entry to track this entire process
+    report_log = ReportLog()
+    db.session.add(report_log)
+    db.session.commit()
+    app_logger.info(f"Created initial ReportLog entry with ID: {report_log.id}")
 
     if 'files[]' not in request.files:
-        app_logger.warning(f"!!!!!!!!!!!!!! File part 'files[]' missing in request. Request ID: {g.get('request_id', 'N/A_upload_no_files_part')} !!!!!!!!!!!!!!")
         flash("No file part in the request. Please select files to upload.", "error")
-        # It's generally better to redirect to a GET route, like the index page, after a POST error.
-        # return redirect(request.url) # request.url would be '/upload'
+        report_log.status = ReportStatus.ERROR
+        report_log.error_message = "No file part in the request."
+        db.session.commit()
         return redirect(url_for('index'))
 
     files: List[FileStorage] = request.files.getlist('files[]')
-    app_logger.info(f"!!!!!!!!!!!!!! Files received in 'files[]': {[f.filename for f in files]}. Request ID: {g.get('request_id', 'N/A_upload_files_list')} !!!!!!!!!!!!!!")
-
     validation_error = _validate_file_list(files)
     if validation_error:
         flash(validation_error[0], validation_error[1])
+        report_log.status = ReportStatus.ERROR
+        report_log.error_message = validation_error[0]
+        db.session.commit()
         return redirect(request.url)
 
     processed_file_data: List[Dict[str, Any]] = []
     uploaded_filenames_for_display: List[str] = []
-    temp_dir: Union[str, None] = None # Changed from = "" to allow None check
+    temp_dir: Optional[str] = None
     total_upload_size = 0
     current_total_extracted_text_length = 0
 
@@ -342,48 +366,41 @@ async def upload_files() -> Union[str, FlaskResponse]:
             if file_storage and file_storage.filename:
                 file_storage.seek(0, os.SEEK_END)
                 total_upload_size += file_storage.tell()
-                file_storage.seek(0) # Reset cursor for subsequent reads
-            else:
-                # This case handles if a FileStorage object is somehow None or has no filename
-                # It might be an empty part of the form, effectively skipping it.
-                pass 
+                file_storage.seek(0)
 
         if total_upload_size > settings.MAX_TOTAL_UPLOAD_SIZE_BYTES:
-            logger.warning(f"Total upload size {total_upload_size} bytes exceeds limit of {settings.MAX_TOTAL_UPLOAD_SIZE_BYTES} bytes.")
-            flash(f"Total upload size exceeds the limit of {settings.MAX_TOTAL_UPLOAD_SIZE_MB} MB.", "error")
+            error_msg = f"Total upload size exceeds the limit of {settings.MAX_TOTAL_UPLOAD_SIZE_MB} MB."
+            logger.warning(f"{error_msg} ({total_upload_size} bytes)")
+            flash(error_msg, "error")
+            report_log.status = ReportStatus.ERROR
+            report_log.error_message = error_msg
+            db.session.commit()
             return redirect(request.url)
 
         temp_dir = tempfile.mkdtemp()
         logger.info(f"Created temporary directory: {temp_dir}")
 
-        logger.info(f"Starting processing of {len(files)} files. Request ID: {g.get('request_id', 'N/A_upload_processing_start')}")
-        num_successful_processing = 0
-        num_failed_processing = 0
-
         for file_storage in files:
-            if not file_storage or not file_storage.filename: # Skip empty/invalid FileStorage objects
-                num_failed_processing += 1
+            if not file_storage or not file_storage.filename:
                 continue
-            
-            # Individual file size check
-            # Must read current position, go to end, read again, then reset.
+
             start_pos = file_storage.tell()
             file_storage.seek(0, os.SEEK_END)
             current_file_size = file_storage.tell()
-            file_storage.seek(start_pos) # Reset to original position before this check
-            
+            file_storage.seek(start_pos)
+
             if current_file_size > settings.MAX_FILE_SIZE_BYTES:
-                logger.warning(f"File {file_storage.filename} size {current_file_size} bytes exceeds single file limit of {settings.MAX_FILE_SIZE_BYTES} bytes.")
                 flash(f"File {file_storage.filename} exceeds the size limit of {settings.MAX_FILE_SIZE_MB} MB and was skipped.", "warning")
-                processed_file_data.append({
-                    'type': 'error',
-                    'filename': file_storage.filename,
-                    'message': f'File exceeds size limit of {settings.MAX_FILE_SIZE_MB} MB'
-                })
-                num_failed_processing += 1
+                # Log this skipped file as a document for traceability
+                doc_log = DocumentLog(
+                    report_id=report_log.id,
+                    original_filename=file_storage.filename,
+                    stored_filepath="SKIPPED_DUE_TO_SIZE",
+                    file_size_bytes=current_file_size
+                )
+                db.session.add(doc_log)
                 continue
-            
-            # Call the helper for actual processing
+
             entries, text_added, f_messages, saved_fname = await _process_single_file_storage(
                 file_storage,
                 temp_dir,
@@ -393,64 +410,70 @@ async def upload_files() -> Union[str, FlaskResponse]:
             current_total_extracted_text_length += text_added
             for fm in f_messages:
                 flash(fm[0], fm[1])
+
             if saved_fname:
                 uploaded_filenames_for_display.append(saved_fname)
-                num_successful_processing += 1
-            else: # Implies an error occurred within _process_single_file_storage or was unsupported
-                # Check if already counted as error due to size limit
-                was_size_error = any(entry.get('filename') == file_storage.filename and 'File exceeds size limit' in entry.get('message', '') for entry in processed_file_data)
-                if not was_size_error: # Avoid double counting if already handled by size check
-                    num_failed_processing += 1
-
-        logger.info(f"Finished processing files. {num_successful_processing} succeeded, {num_failed_processing} failed. Request ID: {g.get('request_id', 'N/A_upload_processing_end')}")
+                # Step 2: Create DocumentLog for the successfully processed file
+                doc_log = DocumentLog(
+                    report_id=report_log.id,
+                    original_filename=file_storage.filename,
+                    stored_filepath=os.path.join(temp_dir, saved_fname), # Store temp path for now
+                    file_size_bytes=current_file_size
+                )
+                db.session.add(doc_log)
 
         if not processed_file_data and not uploaded_filenames_for_display:
-             logger.warning("No files were suitable for processing after filtering. All might have been skipped due to size/type or were invalid.")
-             flash("No files were suitable for processing.", "warning")
-             return redirect(url_for('index'))
+            flash("No files were suitable for processing.", "warning")
+            report_log.status = ReportStatus.ERROR
+            report_log.error_message = "No files were suitable for processing after filtering."
+            db.session.commit()
+            return redirect(url_for('index'))
+        
+        db.session.commit() # Commit document logs before calling LLM
 
+        # Step 3: Call LLM and update ReportLog with results
+        start_time = datetime.utcnow()
         report_content: str = await llm_handler.generate_report_from_content(
             processed_files=processed_file_data,
             additional_text=""
         )
+        end_time = datetime.utcnow()
+        
+        report_log.generation_time_seconds = (end_time - start_time).total_seconds()
+        report_log.llm_raw_response = report_content
+        report_log.final_report_text = report_content # Initially the same
 
         if not report_content or report_content.strip().startswith("ERROR:"):
             logger.error(f"LLM Error: {report_content}")
             flash(f"Could not generate report: {report_content}", "error")
+            report_log.status = ReportStatus.ERROR
+            report_log.error_message = report_content
+            db.session.commit()
             return render_template('index.html', filenames=uploaded_filenames_for_display)
 
-        # Store the generated report content in a temporary file
-        report_id = str(uuid.uuid4())
-        report_filename = f"{report_id}.txt"
-        report_filepath = os.path.join(REPORTS_DIR, report_filename)
-        
-        try:
-            # Ensure REPORTS_DIR exists (though it's created at startup, good to double-check or ensure it if app might run in different contexts)
-            os.makedirs(REPORTS_DIR, exist_ok=True)
-            with open(report_filepath, 'w', encoding='utf-8') as f:
-                f.write(report_content)
-            logger.info(f"Saved generated report to temporary file: {report_filepath}")
-            session['report_file_id'] = report_id # Store only the ID in the session
-            # If company_name is determined, it should be set here, e.g.:
-            # session['company_name'] = determined_company_name 
-        except IOError as e:
-            logger.error(f"Failed to save report content to {report_filepath}: {e}", exc_info=True)
-            flash("Error saving report data for download. Please try again.", "error")
-            # Still attempt to render the report for viewing if saving failed.
-            # The download button might not work, but user can see content.
-            return render_template('report.html', report_content=report_content, filenames=uploaded_filenames_for_display, save_error=True)
+        # Success case
+        report_log.status = ReportStatus.SUCCESS
+        # TODO: Replace with actual cost from a modified llm_handler
+        report_log.api_cost_usd = 0.03  # Placeholder value
+        db.session.commit()
 
-        # Pass the original report_content for display on the current page
-        # The session cookie will only contain the report_file_id, not the large content.
+        # Store the report_log.id in the session for the next step (download)
+        session['report_log_id'] = report_log.id
+        
         return render_template('report.html', report_content=report_content, filenames=uploaded_filenames_for_display)
 
     except Exception as e:
         logger.error(f"Unexpected error in upload_files: {e}", exc_info=True)
         flash("An unexpected server error occurred.", "error")
+        report_log.status = ReportStatus.ERROR
+        report_log.error_message = str(e)
+        db.session.commit()
         return redirect(url_for('index'))
     finally:
         if temp_dir and os.path.exists(temp_dir):
             try:
+                # In a real scenario with permanent storage, you'd copy files out of temp_dir
+                # before deleting it. For now, we accept the stored_filepath becomes invalid.
                 await asyncio.to_thread(shutil.rmtree, temp_dir)
                 logger.info(f"Successfully removed temporary directory: {temp_dir}")
             except Exception as e:
@@ -458,68 +481,41 @@ async def upload_files() -> Union[str, FlaskResponse]:
 
 @app.route('/download_report', methods=['POST'])
 @limiter.limit("30 per minute")
+@auth.login_required
 def download_report() -> Union[FlaskResponse, Tuple[str, int]]:
-    current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Attempting to download report. Session active: {True if session else False}")
+    current_app.logger.info(f"Attempting to download report. Session active: {bool(session)}")
 
     try:
-        report_file_id = session.get('report_file_id')
-        current_app.logger.debug(f"{g.get('request_id', 'N/A_download_report')} - Retrieved report_file_id from session: {report_file_id}")
+        report_log_id = session.get('report_log_id')
+        current_app.logger.debug(f"Retrieved report_log_id from session: {report_log_id}")
 
-        if not report_file_id:
-            current_app.logger.error(f"{g.get('request_id', 'N/A_download_report')} - Report file ID is missing in session.")
-            flash("Il contenuto del report non è disponibile per il download (ID mancante). Per favore, rigenera il report.", "error")
+        if not report_log_id:
+            current_app.logger.error("Report log ID is missing in session.")
+            flash("Your session has expired or the report ID was lost. Please generate the report again.", "error")
             return redirect(url_for('index'))
 
-        report_filename_for_read = f"{report_file_id}.txt"
-        report_filepath = os.path.join(REPORTS_DIR, report_filename_for_read)
-        current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Attempting to read report from: {report_filepath}")
+        # Fetch the report from the database
+        report_log = db.session.get(ReportLog, report_log_id)
 
-        try:
-            with open(report_filepath, 'r', encoding='utf-8') as f:
-                report_content_from_file = f.read()
-            current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Successfully read report content from: {report_filepath}")
-        except FileNotFoundError:
-            current_app.logger.error(f"{g.get('request_id', 'N/A_download_report')} - Report file not found: {report_filepath}")
-            flash("Il file del report non è stato trovato sul server. Potrebbe essere scaduto o eliminato. Per favore, rigenera il report.", "error")
+        if not report_log:
+            current_app.logger.error(f"ReportLog with ID {report_log_id} not found in the database.")
+            flash("The requested report could not be found in the system. Please generate it again.", "error")
             return redirect(url_for('index'))
-        except IOError as e:
-            current_app.logger.error(f"Error reading report file {report_filepath}: {e}", exc_info=True)
-            flash("Errore durante la lettura dei dati del report dal server. Per favore, riprova.", "error")
-            return redirect(url_for('index'))
-        
-        # Log il tipo e il valore di report_content PRIMA della conversione o controllo
-        # This log was for the old session-based content, now we use report_content_from_file
-        current_app.logger.debug(f"{g.get('request_id', 'N/A_download_report')} - Report content from file for DOCX: '{report_content_from_file[:100]}...' (Type: {type(report_content_from_file)})")
 
-        if not report_content_from_file: # Handles empty string from file
-            current_app.logger.error(f"{g.get('request_id', 'N/A_download_report')} - Report content from file is empty.")
-            flash("Il contenuto del report recuperato è vuoto. Per favore, rigenera il report.", "error")
+        # Use the final_report_text if available (for future editing), otherwise the raw response
+        report_content_from_db = report_log.final_report_text or report_log.llm_raw_response
+
+        if not report_content_from_db:
+            current_app.logger.error(f"Report content for ReportLog ID {report_log_id} is empty.")
+            flash("The report content is empty and cannot be downloaded. Please try generating it again.", "error")
             return redirect(url_for('index'))
         
-        # Ensure report_content_from_file is a string (it should be, from file read)
-        if not isinstance(report_content_from_file, str):
-            current_app.logger.error(f"{g.get('request_id', 'N/A_download_report')} - report_content_from_file is not a string. Type: {type(report_content_from_file)}.")
-            flash("Errore interno: il formato del contenuto del report (da file) non è valido. Contatta l'assistenza.", "error")
-            return redirect(url_for('index'))
-
-        current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Generating DOCX for content starting with: '{report_content_from_file[:100]}...'")
-        file_stream: io.BytesIO = docx_generator.create_styled_docx(report_content_from_file)
+        current_app.logger.info(f"Generating DOCX for ReportLog ID {report_log_id}")
+        file_stream: io.BytesIO = docx_generator.create_styled_docx(report_content_from_db)
         
-        # Sanitize filename
-        # Use session.get for company_name as before, it might be set by other logic or default to 'report'
-        clean_company_name = "".join(c if c.isalnum() or c in " -" else "_" for c in session.get('company_name', 'report'))
+        clean_company_name = "".join(c for c in session.get('company_name', 'report') if c.isalnum() or c in " -")
         download_display_filename = f"Perizia_{clean_company_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
         
-        # Optional: Clean up the temporary file after successful DOCX generation and sending.
-        # Consider a more robust cleanup strategy (e.g., a scheduled job) for files not cleaned up due to errors.
-        # For now, we can attempt a cleanup here.
-        try:
-            os.remove(report_filepath)
-            current_app.logger.info(f"{g.get('request_id', 'N/A_download_report')} - Successfully removed temporary report file after DOCX generation: {report_filepath}")
-        except OSError as e:
-            current_app.logger.error(f"Error removing temporary report file {report_filepath} after DOCX generation: {e}")
-
-
         return send_file(
             file_stream,
             as_attachment=True,
@@ -528,9 +524,23 @@ def download_report() -> Union[FlaskResponse, Tuple[str, int]]:
         )
     except Exception as e:
         logger.error(f"Error generating DOCX: {e}", exc_info=True)
-        # Send a more user-friendly error message if possible, or a generic one.
-        flash(f"Errore durante la generazione del file DOCX: {str(e)}", "error")
-        return redirect(url_for('index')) # Redirect to index on error
+        flash(f"An error occurred while generating the DOCX file: {str(e)}", "error")
+        return redirect(url_for('index'))
+
+@app.cli.command("init-db")
+def init_db_command():
+    """Clear existing data and create new tables."""
+    # Ensure the instance folder exists before creating the database
+    try:
+        os.makedirs(app.instance_path)
+    except OSError:
+        # The directory already exists, which is fine.
+        pass
+
+    with app.app_context():
+        db.create_all()
+        
+    click.echo("Initialized the database.")
 
 if __name__ == '__main__':
     app.run(debug=True) 

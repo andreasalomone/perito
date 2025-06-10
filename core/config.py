@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     DOCX_FONT_SIZE_NORMAL: int = 12
     DOCX_FONT_SIZE_HEADING: int = 12
     DOCX_LINE_SPACING: float = 1.5
-    DOCX_SPACE_AFTER_PARAGRAPH: int = 6 # Punti di spazio dopo un paragrafo standard
+    DOCX_SPACE_AFTER_PARAGRAPH: int = 0 # Punti di spazio dopo un paragrafo standard
 
     # Cache Settings
     REPORT_PROMPT_CACHE_NAME: Optional[str] = None # Set this in .env to reuse a specific cache
