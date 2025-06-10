@@ -207,3 +207,133 @@ textarea#report_content {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+/* New styles for incremental file upload interface */
+.file-selection-section {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.file-selection-section label {
+    margin-bottom: 5px;
+}
+
+.file-selection-section input[type="file"] {
+    margin-bottom: 10px;
+}
+
+.file-selection-section button {
+    background-color: #28a745; /* Green for "add" action */
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: 500;
+    transition: background-color 0.2s ease-in-out;
+    align-self: flex-start;
+}
+
+.file-selection-section button:hover {
+    background-color: #218838;
+}
+
+.files-list-section {
+    background-color: #3b3b3b;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 25px;
+    border: 1px solid #555;
+}
+
+.files-list-section h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #ffffff;
+    font-size: 1.2em;
+}
+
+.uploaded-files-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 15px 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 15px;
+    margin-bottom: 8px;
+    background-color: #4a4a4a;
+    border: 1px solid #666;
+    border-radius: 6px;
+    transition: background-color 0.2s ease-in-out;
+}
+
+.file-item:hover {
+    background-color: #525252;
+}
+
+.file-name {
+    color: #e0e0e0;
+    font-weight: 500;
+    flex: 1;
+    margin-right: 10px;
+    word-break: break-word;
+}
+
+.file-size {
+    color: #b0b0b0;
+    font-size: 0.9em;
+    margin-right: 15px;
+    white-space: nowrap;
+}
+
+.remove-file-btn {
+    background-color: #dc3545; /* Red for remove action */
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    transition: background-color 0.2s ease-in-out;
+}
+
+.remove-file-btn:hover {
+    background-color: #c82333;
+}
+
+.secondary-btn {
+    background-color: #6c757d; /* Gray for secondary actions */
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: 500;
+    transition: background-color 0.2s ease-in-out;
+}
+
+.secondary-btn:hover {
+    background-color: #5a6268;
+}
+
+/* Enhanced form styling for report generation */
+#generateReportForm {
+    margin-top: 15px;
+}
+
+#generateReportForm button[type="submit"] {
+    width: 100%;
+    font-size: 1.1em;
+    padding: 15px 20px;
+}

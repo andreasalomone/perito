@@ -28,31 +28,152 @@
           {% endif %}
         {% endwith %}
 
-        <form action="{{ url_for('upload_files') }}" method="post" enctype="multipart/form-data">
-            <label for="files">Carica Documenti (PDF, DOCX, TXT, PNG, JPG, XLSX):</label>
-            <input type="file" name="files[]" id="files" multiple required>
-            <button type="submit">Genera Perizia</button>
+        <!-- File selection section -->
+        <div class="file-selection-section">
+            <label for="files">Seleziona Documenti (PDF, DOCX, TXT, PNG, JPG, XLSX, EML):</label>
+            <input type="file" name="files[]" id="files" multiple>
+            <button type="button" id="addFilesBtn">Aggiungi File</button>
+        </div>
+
+        <!-- Files list display -->
+        <div class="files-list-section" id="filesListSection" style="display: none;">
+            <h3>File Caricati:</h3>
+            <ul id="filesList" class="uploaded-files-list"></ul>
+            <button type="button" id="clearAllBtn" class="secondary-btn">Rimuovi Tutti</button>
+        </div>
+
+        <!-- Report generation section -->
+        <form id="generateReportForm" action="{{ url_for('upload_files') }}" method="post" enctype="multipart/form-data" style="display: none;">
+            <button type="submit" id="generateReportBtn">Genera Perizia</button>
         </form>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const form = document.querySelector('form');
+            const fileInput = document.getElementById('files');
+            const addFilesBtn = document.getElementById('addFilesBtn');
+            const filesList = document.getElementById('filesList');
+            const filesListSection = document.getElementById('filesListSection');
+            const generateReportForm = document.getElementById('generateReportForm');
+            const generateReportBtn = document.getElementById('generateReportBtn');
+            const clearAllBtn = document.getElementById('clearAllBtn');
             const spinner = document.getElementById('loadingSpinner');
 
-            if (form && spinner) {
-                form.addEventListener('submit', function() {
-                    // Check if files are selected
-                    const fileInput = document.getElementById('files');
-                    if (fileInput && fileInput.files.length > 0) {
-                        spinner.style.visibility = 'visible';
-                    } else {
-                        // Optionally, you can display an error message if no files are selected
-                        // and prevent form submission if you haven't used the 'required' attribute
-                        // For now, we assume the 'required' attribute handles this.
-                    }
+            let accumulatedFiles = [];
+
+            // Add files to the accumulated list
+            addFilesBtn.addEventListener('click', function() {
+                const newFiles = Array.from(fileInput.files);
+                
+                if (newFiles.length === 0) {
+                    alert('Seleziona almeno un file prima di aggiungerlo.');
+                    return;
+                }
+
+                // Add new files to accumulated list
+                accumulatedFiles.push(...newFiles);
+                
+                // Clear the file input
+                fileInput.value = '';
+                
+                // Update the display
+                updateFilesDisplay();
+                
+                // Show the files list and generate button if we have files
+                if (accumulatedFiles.length > 0) {
+                    filesListSection.style.display = 'block';
+                    generateReportForm.style.display = 'block';
+                }
+            });
+
+            // Clear all files
+            clearAllBtn.addEventListener('click', function() {
+                accumulatedFiles = [];
+                updateFilesDisplay();
+                filesListSection.style.display = 'none';
+                generateReportForm.style.display = 'none';
+            });
+
+            // Update the visual display of files
+            function updateFilesDisplay() {
+                filesList.innerHTML = '';
+                
+                accumulatedFiles.forEach((file, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'file-item';
+                    li.innerHTML = `
+                        <span class="file-name">${file.name}</span>
+                        <span class="file-size">(${formatFileSize(file.size)})</span>
+                        <button type="button" class="remove-file-btn" data-index="${index}">Rimuovi</button>
+                    `;
+                    filesList.appendChild(li);
+                });
+
+                // Add event listeners to remove buttons
+                document.querySelectorAll('.remove-file-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const index = parseInt(this.getAttribute('data-index'));
+                        accumulatedFiles.splice(index, 1);
+                        updateFilesDisplay();
+                        
+                        if (accumulatedFiles.length === 0) {
+                            filesListSection.style.display = 'none';
+                            generateReportForm.style.display = 'none';
+                        }
+                    });
                 });
             }
+
+            // Format file size for display
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            // Handle form submission
+            generateReportForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                if (accumulatedFiles.length === 0) {
+                    alert('Aggiungi almeno un file prima di generare la perizia.');
+                    return;
+                }
+
+                // Create a new FormData object with all accumulated files
+                const formData = new FormData();
+                accumulatedFiles.forEach(file => {
+                    formData.append('files[]', file);
+                });
+
+                // Show spinner
+                spinner.style.visibility = 'visible';
+
+                // Submit via fetch
+                fetch(generateReportForm.action, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (response.ok) {
+                        return response.text();
+                    }
+                    throw new Error('Network response was not ok');
+                })
+                .then(html => {
+                    // Replace current page with the response
+                    document.open();
+                    document.write(html);
+                    document.close();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Si è verificato un errore durante la generazione della perizia.');
+                    spinner.style.visibility = 'hidden';
+                });
+            });
         });
     </script>
 </body>

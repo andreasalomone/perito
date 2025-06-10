@@ -2,6 +2,7 @@ import os
 from google import genai
 from google.genai import types
 from google.api_core import exceptions as google_exceptions
+from google.genai import errors as genai_errors
 from typing import Dict, Any, List, Union, Optional, Tuple
 import logging
 import asyncio
@@ -284,6 +285,8 @@ async def generate_report_from_content(
 
         # Use client.aio.models.generate_content for async call
         response = None
+        cache_fallback_attempted = False
+        
         try:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(settings.LLM_API_RETRY_ATTEMPTS),
@@ -307,8 +310,45 @@ async def generate_report_from_content(
         except asyncio.TimeoutError:
             logger.error(f"LLM content generation timed out after {settings.LLM_API_TIMEOUT_SECONDS} seconds.", exc_info=True)
             return f"Error: LLM content generation timed out after {settings.LLM_API_TIMEOUT_SECONDS} seconds."
-        # The broad try-except in generate_report_from_content will catch other google_exceptions.GoogleAPIError or general Exception.
-        # No need to re-raise here unless for specific intermediate handling not required by the prompt.
+        except genai_errors.ClientError as e:
+            # Check if this might be a cache-related error (status code 400 with INVALID_ARGUMENT)
+            if (active_cache_name_for_generation and not cache_fallback_attempted and 
+                hasattr(e, 'status_code') and e.status_code == 400 and 
+                "INVALID_ARGUMENT" in str(e)):
+                logger.warning(f"Cache-related INVALID_ARGUMENT error detected. Falling back to generation without cache: {e}")
+                cache_fallback_attempted = True
+                
+                # Rebuild config without cache and include prompts directly
+                final_prompt_parts_fallback = [
+                    GUIDA_STILE_TERMINOLOGIA_ED_ESEMPI,
+                    "\n\n",
+                    SCHEMA_REPORT,
+                    "\n\n",
+                    SYSTEM_INSTRUCTION,
+                    "\n\n"
+                ]
+                final_prompt_parts_fallback.extend(final_prompt_parts)  # Add existing content
+                
+                fallback_config = types.GenerateContentConfig(
+                    **{k: v for k, v in generation_config_args.items() if k != "cached_content"}
+                )
+                
+                try:
+                    logger.info("Attempting generation without cache as fallback...")
+                    response = await asyncio.wait_for(
+                        client.aio.models.generate_content(
+                            model=settings.LLM_MODEL_NAME,
+                            contents=final_prompt_parts_fallback,
+                            config=fallback_config
+                        ),
+                        timeout=settings.LLM_API_TIMEOUT_SECONDS
+                    )
+                    logger.info("Fallback generation without cache succeeded.")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback generation also failed: {fallback_error}", exc_info=True)
+                    raise e  # Re-raise original error
+            else:
+                raise e  # Re-raise if not cache-related or fallback already attempted
         
         if response is None: # Should ideally be caught by exceptions above, but as a safeguard
             logger.error("LLM response is None after generation attempts, possibly due to unhandled retry/timeout scenario.")
