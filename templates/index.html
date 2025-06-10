@@ -7,11 +7,17 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <!-- Added Spinner HTML -->
-    <div class="spinner-overlay" id="loadingSpinner">
-        <div style="text-align: center;">
+    <div id="loader-overlay" class="loader-overlay">
+        <div class="loader-content">
             <div class="spinner"></div>
-            <p class="spinner-text">Generando il report...</p>
+            <h2>Stiamo generando la tua perizia...</h2>
+            <p>Questa operazione potrebbe richiedere qualche minuto.</p>
+            <div class="timer">Tempo trascorso: <span id="timer-seconds">0</span>s</div>
+            <div class="logs">
+                <ul id="log-list">
+                    <!-- Log messages will be injected here by JS -->
+                </ul>
+            </div>
         </div>
     </div>
 
@@ -28,151 +34,65 @@
           {% endif %}
         {% endwith %}
 
-        <!-- File selection section -->
-        <div class="file-selection-section">
-            <label for="files">Seleziona Documenti (PDF, DOCX, TXT, PNG, JPG, XLSX, EML):</label>
-            <input type="file" name="files[]" id="files" multiple>
-            <button type="button" id="addFilesBtn">Aggiungi File</button>
-        </div>
-
-        <!-- Files list display -->
-        <div class="files-list-section" id="filesListSection" style="display: none;">
-            <h3>File Caricati:</h3>
-            <ul id="filesList" class="uploaded-files-list"></ul>
-            <button type="button" id="clearAllBtn" class="secondary-btn">Rimuovi Tutti</button>
-        </div>
-
-        <!-- Report generation section -->
-        <form id="generateReportForm" action="{{ url_for('upload_files') }}" method="post" enctype="multipart/form-data" style="display: none;">
-            <button type="submit" id="generateReportBtn">Genera Perizia</button>
+        <form action="{{ url_for('upload_files') }}" method="post" enctype="multipart/form-data">
+            <label for="files">Carica Documenti (PDF, DOCX, TXT, PNG, JPG, XLSX):</label>
+            <input type="file" name="files[]" id="files" multiple required>
+            <button type="submit">Genera Perizia</button>
         </form>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            const loaderOverlay = document.getElementById('loader-overlay');
             const fileInput = document.getElementById('files');
-            const addFilesBtn = document.getElementById('addFilesBtn');
-            const filesList = document.getElementById('filesList');
-            const filesListSection = document.getElementById('filesListSection');
-            const generateReportForm = document.getElementById('generateReportForm');
-            const generateReportBtn = document.getElementById('generateReportBtn');
-            const clearAllBtn = document.getElementById('clearAllBtn');
-            const spinner = document.getElementById('loadingSpinner');
+            const timerSpan = document.getElementById('timer-seconds');
+            const logList = document.getElementById('log-list');
 
-            let accumulatedFiles = [];
+            let timerInterval;
+            let seconds = 0;
 
-            // Add files to the accumulated list
-            addFilesBtn.addEventListener('click', function() {
-                const newFiles = Array.from(fileInput.files);
+            const logMessages = [
+                { time: 1, message: "Avvio del processo di generazione..." },
+                { time: 3, message: "Caricamento dei documenti in corso..." },
+                { time: 8, message: "Estrazione del testo dai documenti (OCR in corso)..." },
+                { time: 15, message: "Analisi del contenuto e preparazione per l'invio all'AI..." },
+                { time: 25, message: "L'intelligenza artificiale sta generando il report (questa è la fase più lunga)..." },
+                { time: 50, message: "Quasi finito, finalizzazione del documento..." }
+            ];
+
+            function startLoader() {
+                loaderOverlay.classList.add('visible');
                 
-                if (newFiles.length === 0) {
-                    alert('Seleziona almeno un file prima di aggiungerlo.');
-                    return;
-                }
+                // Start timer
+                seconds = 0;
+                timerSpan.textContent = seconds;
+                timerInterval = setInterval(() => {
+                    seconds++;
+                    timerSpan.textContent = seconds;
+                }, 1000);
 
-                // Add new files to accumulated list
-                accumulatedFiles.push(...newFiles);
-                
-                // Clear the file input
-                fileInput.value = '';
-                
-                // Update the display
-                updateFilesDisplay();
-                
-                // Show the files list and generate button if we have files
-                if (accumulatedFiles.length > 0) {
-                    filesListSection.style.display = 'block';
-                    generateReportForm.style.display = 'block';
-                }
-            });
-
-            // Clear all files
-            clearAllBtn.addEventListener('click', function() {
-                accumulatedFiles = [];
-                updateFilesDisplay();
-                filesListSection.style.display = 'none';
-                generateReportForm.style.display = 'none';
-            });
-
-            // Update the visual display of files
-            function updateFilesDisplay() {
-                filesList.innerHTML = '';
-                
-                accumulatedFiles.forEach((file, index) => {
-                    const li = document.createElement('li');
-                    li.className = 'file-item';
-                    li.innerHTML = `
-                        <span class="file-name">${file.name}</span>
-                        <span class="file-size">(${formatFileSize(file.size)})</span>
-                        <button type="button" class="remove-file-btn" data-index="${index}">Rimuovi</button>
-                    `;
-                    filesList.appendChild(li);
-                });
-
-                // Add event listeners to remove buttons
-                document.querySelectorAll('.remove-file-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
-                        const index = parseInt(this.getAttribute('data-index'));
-                        accumulatedFiles.splice(index, 1);
-                        updateFilesDisplay();
-                        
-                        if (accumulatedFiles.length === 0) {
-                            filesListSection.style.display = 'none';
-                            generateReportForm.style.display = 'none';
-                        }
-                    });
+                // Clear previous logs and schedule new ones
+                logList.innerHTML = '';
+                logMessages.forEach(log => {
+                    setTimeout(() => {
+                        const li = document.createElement('li');
+                        li.textContent = `[+${seconds}s] ${log.message}`;
+                        logList.appendChild(li);
+                        logList.scrollTop = logList.scrollHeight;
+                    }, log.time * 1000);
                 });
             }
 
-            // Format file size for display
-            function formatFileSize(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-            }
-
-            // Handle form submission
-            generateReportForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                if (accumulatedFiles.length === 0) {
-                    alert('Aggiungi almeno un file prima di generare la perizia.');
-                    return;
+            form.addEventListener('submit', function(e) {
+                if (fileInput.files.length > 0) {
+                    startLoader();
+                } else {
+                    // This case is typically handled by the 'required' attribute on the input
+                    // but we can prevent submission here as a fallback.
+                    e.preventDefault();
+                    // You might want to show a custom alert or message here
                 }
-
-                // Create a new FormData object with all accumulated files
-                const formData = new FormData();
-                accumulatedFiles.forEach(file => {
-                    formData.append('files[]', file);
-                });
-
-                // Show spinner
-                spinner.style.visibility = 'visible';
-
-                // Submit via fetch
-                fetch(generateReportForm.action, {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    if (response.ok) {
-                        return response.text();
-                    }
-                    throw new Error('Network response was not ok');
-                })
-                .then(html => {
-                    // Replace current page with the response
-                    document.open();
-                    document.write(html);
-                    document.close();
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Si è verificato un errore durante la generazione della perizia.');
-                    spinner.style.visibility = 'hidden';
-                });
             });
         });
     </script>

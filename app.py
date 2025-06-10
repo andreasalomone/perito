@@ -460,7 +460,12 @@ async def upload_files() -> Union[str, FlaskResponse]:
         # Store the report_log.id in the session for the next step (download)
         session['report_log_id'] = report_log.id
         
-        return render_template('report.html', report_content=report_content, filenames=uploaded_filenames_for_display)
+        return render_template(
+            'report.html', 
+            report_content=report_content, 
+            filenames=uploaded_filenames_for_display,
+            generation_time=report_log.generation_time_seconds
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in upload_files: {e}", exc_info=True)

@@ -10,6 +10,24 @@
     <div class="container">
         <h1>Perizia Generata</h1>
 
+        {% if generation_time is defined and generation_time is not none %}
+            {% set time_saved_seconds = (7200 - generation_time)|int %}
+            {% if time_saved_seconds > 0 %}
+                {% set hours = (time_saved_seconds / 3600)|int %}
+                {% set minutes = ((time_saved_seconds % 3600) / 60)|int %}
+                {% set seconds = (time_saved_seconds % 60)|round|int %}
+                
+                {% set time_parts = [] %}
+                {% if hours > 0 %}{% set _ = time_parts.append(hours ~ ' ore') %}{% endif %}
+                {% if minutes > 0 %}{% set _ = time_parts.append(minutes ~ ' minuti') %}{% endif %}
+                {% if seconds > 0 %}{% set _ = time_parts.append(seconds ~ ' secondi') %}{% endif %}
+                
+                <div class="time-saved-banner">
+                    🎉 Congratulazioni! Hai generato questa perizia in <strong>{{ "%.2f"|format(generation_time) }} secondi</strong>, risparmiando circa <strong>{{ time_parts|join(', ') }}</strong>.
+                </div>
+            {% endif %}
+        {% endif %}
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 <ul class="flash-messages">
