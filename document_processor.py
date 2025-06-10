@@ -5,7 +5,7 @@ from PIL import Image # For image handling - potentially for validation, no long
 from docx import Document as DocxDocument
 import openpyxl # For XLSX files
 import io
-from typing import List, Union, Callable, Any, TypeVar, Dict # Added Dict
+from typing import List, Union, Callable, Any, TypeVar, Dict, cast # Added cast
 import logging
 import functools
 import mimetypes # Added for MIME type guessing
@@ -104,16 +104,20 @@ def extract_text_from_txt(txt_path: str) -> Dict[str, str]:
         content = f.read()
     return {'type': 'text', 'content': content, 'filename': os.path.basename(txt_path)}
 
-@handle_extraction_errors({'type': 'text', 'content': '', 'filename': '', 'processed_attachments': []})
-def process_eml_file(eml_path: str, upload_folder: str) -> Dict[str, Any]:
+@handle_extraction_errors([]) # On error, return an empty list to match the new signature
+def process_eml_file(eml_path: str, upload_folder: str) -> List[Dict[str, Any]]:
     """
     Processes an .eml file, extracting its text body and saving/processing attachments.
-    Returns a dictionary with the text content and a list of processed attachment information.
+    Returns a FLAT LIST of dictionaries, one for the text content and one for each processed attachment part.
     """
     mail = mailparser.parse_from_file(eml_path)
     
+    # The list that will be returned, containing all content parts from the EML.
+    all_parts: List[Dict[str, Any]] = []
+    
     # Extract plain text body
     # Prioritize text_plain, then html (converted to text by mailparser), then body
+    text_content = ""
     if mail.text_plain:
         text_content = "\n".join(mail.text_plain)
     elif mail.text_html:
@@ -123,7 +127,13 @@ def process_eml_file(eml_path: str, upload_folder: str) -> Dict[str, Any]:
         if not text_content:
              logger.warning(f"EML file {eml_path} has no discernible text body (text_plain, text_html, or body).")
 
-    processed_attachments_info: List[Dict[str, Any]] = []
+    # Add the main email body as the first part
+    all_parts.append({
+        'type': 'text',
+        'content': text_content,
+        'filename': f"{os.path.basename(eml_path)} (body)", # Clarify this is the body
+        'original_filetype': 'eml'
+    })
 
     # Ensure the 'out' directory for attachments exists within the upload_folder
     attachments_output_dir = pathlib.Path(upload_folder) / "email_attachments"
@@ -165,13 +175,23 @@ def process_eml_file(eml_path: str, upload_folder: str) -> Dict[str, Any]:
                     f.write(decoded_payload)
                 logger.info(f"Saved attachment '{attachment_save_path.name}' from {eml_path} to {attachments_output_dir}")
 
-                # Recursively process the saved attachment
-                # Pass the 'upload_folder' which is the base for 'email_attachments'
-                attachment_info = process_uploaded_file(str(attachment_save_path), upload_folder)
-                if attachment_info and attachment_info.get('type') != 'error' and attachment_info.get('type') != 'unsupported':
-                    processed_attachments_info.append(attachment_info)
+                # Recursively process the saved attachment.
+                # The result can be a dict (for a single file) or a list (for a nested .eml).
+                attachment_parts = process_uploaded_file(str(attachment_save_path), upload_folder)
+                
+                if not attachment_parts:
+                    continue
+
+                if isinstance(attachment_parts, list):
+                    # If it's a list (from a nested .eml), extend our list with its parts
+                    all_parts.extend(attachment_parts)
+                elif attachment_parts.get('type') not in ['error', 'unsupported']:
+                    # If it's a dict for a valid file type, append it
+                    all_parts.append(cast(Dict[str, Any], attachment_parts))
                 else:
-                    logger.warning(f"Could not process attachment '{attachment_save_path.name}' from {eml_path}. Info: {attachment_info}")
+                    # Log error/unsupported cases but don't add them to the parts list
+                    logger.warning(f"Could not process or skipped attachment '{attachment_save_path.name}' from {eml_path}. Info: {attachment_parts}")
+
             except base64.binascii.Error as b64e:
                 logger.error(f"Base64 decoding error for attachment '{original_filename}' in {eml_path}: {b64e}")
             except IOError as ioe:
@@ -181,21 +201,18 @@ def process_eml_file(eml_path: str, upload_folder: str) -> Dict[str, Any]:
         else:
             logger.info(f"Skipping attachment '{original_filename}' (type: {content_type}) from {eml_path} as it's not PDF or image.")
             
-    return {
-        'type': 'text', 
-        'content': text_content, 
-        'filename': os.path.basename(eml_path),
-        'original_filetype': 'eml', # Add this to distinguish
-        'processed_attachments': processed_attachments_info # List of dicts
-    }
+    return all_parts
 
-def process_uploaded_file(filepath: str, upload_folder: str) -> Dict[str, Any]:
-    """Determines file type and calls the appropriate processing function."""
+def process_uploaded_file(filepath: str, upload_folder: str) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    """Determines file type and calls the appropriate processing function.
+    
+    Returns a dictionary for most file types, but a list of dictionaries for .eml files.
+    """
     _, ext = os.path.splitext(filepath)
     ext = ext.lower()
     filename: str = os.path.basename(filepath) # Moved here for all return paths
 
-    processing_function: Union[Callable[[str], Dict[str, Any]], None] = None
+    processing_function: Union[Callable[..., Any], None] = None
 
     if ext == '.pdf':
         processing_function = prepare_pdf_for_llm
@@ -210,6 +227,7 @@ def process_uploaded_file(filepath: str, upload_folder: str) -> Dict[str, Any]:
     elif ext == '.eml':
         # For .eml, we need to pass the upload_folder to save attachments
         # The functools.partial allows us to pre-fill the 'upload_folder' argument
+        # This will return a List[Dict[str, Any]]
         processing_function = functools.partial(process_eml_file, upload_folder=upload_folder)
     else:
         logger.warning(f"Unsupported file type: {ext} for file {filepath}")
@@ -217,9 +235,12 @@ def process_uploaded_file(filepath: str, upload_folder: str) -> Dict[str, Any]:
 
     if processing_function:
         result = processing_function(filepath)
-        # Ensure filename is in result, especially if decorator returned default
-        if 'filename' not in result or not result['filename']:
-            result['filename'] = filename
+        
+        # If the result is a dictionary (most cases), ensure filename is present.
+        # If it's a list (from an .eml), its elements are assumed to be correctly formatted.
+        if isinstance(result, dict):
+            if 'filename' not in result or not result['filename']:
+                result['filename'] = filename
         return result
     
     # Should not be reached if logic is correct, but as a fallback:

@@ -261,57 +261,44 @@ async def _process_single_file_storage(
         logger.info(f"Saved uploaded file to temporary path: {filepath}")
         successfully_saved_filename = filename # Mark as saved for display list
 
-        processed_info: Dict[str, Any] = await asyncio.to_thread(
+        processed_info: Union[Dict[str, Any], List[Dict[str, Any]]] = await asyncio.to_thread(
             document_processor.process_uploaded_file, filepath, temp_dir
         )
+
+        parts_to_process: List[Dict[str, Any]] = []
+        was_eml = isinstance(processed_info, list)
+        if was_eml:
+            # It's an EML file that returned a list of its parts
+            if processed_info:
+                parts_to_process.extend(processed_info)
+        elif isinstance(processed_info, dict):
+            # It's any other single file type
+            parts_to_process.append(processed_info)
 
         temp_processed_file_data_list_for_this_file: List[Dict[str, Any]] = []
         current_length_for_this_file_processing = current_total_extracted_text_length
 
-        if processed_info.get('type') == 'error' or processed_info.get('type') == 'unsupported':
-            processed_entries.append(processed_info)
-        elif processed_info.get('original_filetype') == 'eml':
-            if processed_info.get('type') == 'text' and processed_info.get('content'):
+        for part in parts_to_process:
+            part_type = part.get('type')
+            part_filename = part.get('filename', original_filename_for_logging)
+
+            if part_type in ['error', 'unsupported']:
+                processed_entries.append(part)
+            elif part_type == 'text' and part.get('content'):
+                source_desc = f"from {original_filename_for_logging}" if was_eml else "file content"
+                
                 temp_processed_file_data_list_for_this_file, current_length_for_this_file_processing, flash_msg = \
                     _add_text_data_to_processed_list(
                         temp_processed_file_data_list_for_this_file, 
                         current_length_for_this_file_processing, 
-                        processed_info['content'], 
-                        filename, 
-                        "email body"
+                        part['content'],
+                        part_filename,
+                        source_desc
                     )
                 if flash_msg: flash_messages.append(flash_msg)
-            
-            if 'processed_attachments' in processed_info and isinstance(processed_info['processed_attachments'], list):
-                for attachment_data in processed_info['processed_attachments']:
-                    if attachment_data.get('type') == 'text' and attachment_data.get('content'):
-                        temp_processed_file_data_list_for_this_file, current_length_for_this_file_processing, flash_msg = \
-                            _add_text_data_to_processed_list(
-                                temp_processed_file_data_list_for_this_file, 
-                                current_length_for_this_file_processing, 
-                                attachment_data['content'],
-                                attachment_data.get('filename', 'unknown_attachment'),
-                                f"attachment from EML: {filename}"
-                            )
-                        if flash_msg: flash_messages.append(flash_msg)
-                    elif attachment_data.get('type') == 'vision':
-                        # Vision attachments are added directly to processed_entries
-                        processed_entries.append(attachment_data) 
-                    elif attachment_data.get('type') == 'error' or attachment_data.get('type') == 'unsupported':
-                        processed_entries.append(attachment_data)
-        
-        elif processed_info.get('type') == 'text' and processed_info.get('content'):
-            temp_processed_file_data_list_for_this_file, current_length_for_this_file_processing, flash_msg = \
-                _add_text_data_to_processed_list(
-                    temp_processed_file_data_list_for_this_file, 
-                    current_length_for_this_file_processing, 
-                    processed_info['content'], 
-                    filename, 
-                    "file content"
-                )
-            if flash_msg: flash_messages.append(flash_msg)
-        elif processed_info.get('type') == 'vision':
-            processed_entries.append(processed_info) # Add vision files directly
+
+            elif part_type == 'vision':
+                processed_entries.append(part)
         
         # Add text data accumulated for this file to the main processed_entries
         processed_entries.extend(temp_processed_file_data_list_for_this_file)
