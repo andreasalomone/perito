@@ -55,13 +55,15 @@ async def _get_or_create_prompt_cache(client: genai.Client) -> Optional[str]:
                 return client.caches.get(name=cache_name_for_get)
 
             cache = await asyncio.to_thread(_get_cache_with_retry)
+            # Enhanced cache validation
+            logger.info(f"Retrieved cache: {cache.name}, model: {cache.model}, expires_time: {getattr(cache, 'expire_time', 'unknown')}")
             # Basic validation: check if it's for the same model and not expired (implicitly, get succeeds)
             if cache.model.endswith(settings.LLM_MODEL_NAME): # Model name in cache includes 'models/' prefix
                 logger.info(f"Successfully retrieved and validated existing cache: {cache.name}")
                 active_cache_name = cache.name
             else:
                 logger.warning(
-                    f"Existing cache {existing_cache_name} is for a different model ({cache.model}). \
+                    f"Existing cache {existing_cache_name} is for a different model ({cache.model}) than expected ({settings.LLM_MODEL_NAME}). \
                     Will create a new cache for {settings.LLM_MODEL_NAME}."
                 )
         except google_exceptions.NotFound:
@@ -280,14 +282,22 @@ async def generate_report_from_content(
         final_config = types.GenerateContentConfig(**generation_config_args)
 
         logger.debug(f"Sending request to Gemini. Model: {settings.LLM_MODEL_NAME}. Using cache: {bool(active_cache_name_for_generation)}. Config: {final_config}")
-        # For brevity in logs, don't log full final_prompt_parts if it's very large.
-        # logger.debug(f"Prompt parts being sent: {final_prompt_parts}") 
+        # Add logging for cache details
+        if active_cache_name_for_generation:
+            logger.info(f"Request will use cached content: {active_cache_name_for_generation}")
+        else:
+            logger.info("Request will NOT use cached content (prompts included directly)")
 
         # Use client.aio.models.generate_content for async call
         response = None
-        cache_fallback_attempted = False
+        
+        # --- Main Generation Logic ---
+        # We first try with the cache. If that fails with a specific, non-retriable
+        # ClientError related to the cache, we then attempt a fallback without it.
         
         try:
+            # ATTEMPT 1: With cache (if available)
+            logger.info("Attempting LLM generation with current settings (including cache if configured).")
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(settings.LLM_API_RETRY_ATTEMPTS),
                 wait=wait_fixed(settings.LLM_API_RETRY_WAIT_SECONDS),
@@ -304,55 +314,72 @@ async def generate_report_from_content(
                         ),
                         timeout=settings.LLM_API_TIMEOUT_SECONDS
                     )
-        except RetryError as re:
-            logger.error(f"Failed to generate content after multiple retries: {re}", exc_info=True)
-            return f"Error: LLM API failed after {settings.LLM_API_RETRY_ATTEMPTS} retries: {str(re)}"
-        except asyncio.TimeoutError:
-            logger.error(f"LLM content generation timed out after {settings.LLM_API_TIMEOUT_SECONDS} seconds.", exc_info=True)
-            return f"Error: LLM content generation timed out after {settings.LLM_API_TIMEOUT_SECONDS} seconds."
+
         except genai_errors.ClientError as e:
-            # Check if this might be a cache-related error (status code 400 with INVALID_ARGUMENT)
-            if (active_cache_name_for_generation and not cache_fallback_attempted and 
-                hasattr(e, 'status_code') and e.status_code == 400 and 
-                "INVALID_ARGUMENT" in str(e)):
-                logger.warning(f"Cache-related INVALID_ARGUMENT error detected. Falling back to generation without cache: {e}")
-                cache_fallback_attempted = True
+            # This block catches non-retriable client errors from the first attempt.
+            # The most important one to handle is a potential cache-related error.
+            logger.warning(f"Initial LLM call failed with a non-retriable ClientError: {e}")
+            
+            is_cache_error = (
+                active_cache_name_for_generation and
+                "INVALID_ARGUMENT" in str(e) and
+                ("400" in str(e) or (hasattr(e, 'status_code') and e.status_code == 400))
+            )
+            
+            if is_cache_error:
+                logger.warning("Cache-related INVALID_ARGUMENT error detected. Attempting fallback generation without cache.")
                 
                 # Rebuild config without cache and include prompts directly
+                # This is necessary because the original prompt parts might not have the full text
+                # if caching was expected to work.
                 final_prompt_parts_fallback = [
-                    GUIDA_STILE_TERMINOLOGIA_ED_ESEMPI,
-                    "\n\n",
-                    SCHEMA_REPORT,
-                    "\n\n",
-                    SYSTEM_INSTRUCTION,
-                    "\n\n"
+                    GUIDA_STILE_TERMINOLOGIA_ED_ESEMPI, "\n\n",
+                    SCHEMA_REPORT, "\n\n",
+                    SYSTEM_INSTRUCTION, "\n\n"
                 ]
-                final_prompt_parts_fallback.extend(final_prompt_parts)  # Add existing content
+                final_prompt_parts_fallback.extend(final_prompt_parts) # Add the content parts
                 
-                fallback_config = types.GenerateContentConfig(
-                    **{k: v for k, v in generation_config_args.items() if k != "cached_content"}
-                )
-                
+                fallback_config_args = {k: v for k, v in generation_config_args.items() if k != "cached_content"}
+                fallback_config = types.GenerateContentConfig(**fallback_config_args)
+
                 try:
-                    logger.info("Attempting generation without cache as fallback...")
-                    response = await asyncio.wait_for(
-                        client.aio.models.generate_content(
-                            model=settings.LLM_MODEL_NAME,
-                            contents=final_prompt_parts_fallback,
-                            config=fallback_config
-                        ),
-                        timeout=settings.LLM_API_TIMEOUT_SECONDS
-                    )
+                    # ATTEMPT 2: Fallback without cache
+                    logger.info("Calling Gemini generate_content for the second time (fallback without cache).")
+                    async for attempt in AsyncRetrying(
+                        stop=stop_after_attempt(settings.LLM_API_RETRY_ATTEMPTS),
+                        wait=wait_fixed(settings.LLM_API_RETRY_WAIT_SECONDS),
+                        retry=retry_if_exception_type(RETRIABLE_GEMINI_EXCEPTIONS),
+                        reraise=True
+                    ):
+                        with attempt:
+                             response = await asyncio.wait_for(
+                                client.aio.models.generate_content(
+                                    model=settings.LLM_MODEL_NAME,
+                                    contents=final_prompt_parts_fallback,
+                                    config=fallback_config
+                                ),
+                                timeout=settings.LLM_API_TIMEOUT_SECONDS
+                            )
                     logger.info("Fallback generation without cache succeeded.")
                 except Exception as fallback_error:
-                    logger.error(f"Fallback generation also failed: {fallback_error}", exc_info=True)
-                    raise e  # Re-raise original error
+                    logger.error(f"The fallback generation attempt also failed: {fallback_error}", exc_info=True)
+                    # Return a clear error indicating both attempts failed.
+                    return f"Error: LLM call failed with cache, and the fallback attempt also failed. Details: {fallback_error}"
             else:
-                raise e  # Re-raise if not cache-related or fallback already attempted
-        
-        if response is None: # Should ideally be caught by exceptions above, but as a safeguard
-            logger.error("LLM response is None after generation attempts, possibly due to unhandled retry/timeout scenario.")
-            return "Error: LLM response was unexpectedly None after generation attempts."
+                # The error was a ClientError but not the one we handle for fallback. Re-raise it.
+                logger.error(f"A non-cache-related ClientError occurred. This is not handled as a fallback. Error: {e}")
+                raise e
+
+        except (RetryError, asyncio.TimeoutError) as e:
+            # This block catches errors from the first attempt if all retries failed.
+            logger.error(f"Initial LLM call failed after all retries or timed out: {e}", exc_info=True)
+            return f"Error: The LLM API call failed after {settings.LLM_API_RETRY_ATTEMPTS} retries or timed out."
+
+        if response is None:
+            # This is a safeguard. If we've gotten here, response should have a value
+            # or an exception should have been raised.
+            logger.error("LLM response is unexpectedly None after all generation attempts and fallbacks.")
+            return "Error: LLM response was unexpectedly None after all processing."
 
         report_content: str = ""
         

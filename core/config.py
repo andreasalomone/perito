@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Cache Settings
     REPORT_PROMPT_CACHE_NAME: Optional[str] = None # Set this in .env to reuse a specific cache
-    CACHE_TTL_DAYS: int = 30 # Time-to-live for the prompt cache in days
+    CACHE_TTL_DAYS: int = 2 # Time-to-live for the prompt cache in days
     CACHE_DISPLAY_NAME: str = "ReportGenerationPromptsV2" # Display name for new caches
 
     LLM_API_RETRY_ATTEMPTS: int = 3 # Number of retry attempts for the LLM API call
