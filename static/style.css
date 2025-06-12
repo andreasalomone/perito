@@ -176,6 +176,124 @@ textarea#report_content {
     border-color: #788088;
 }
 
+/* --- New File Upload Styles (for index.html) --- */
+.file-upload-label {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 30px;
+    border: 2px dashed #555;
+    border-radius: 12px;
+    background-color: #3b3b3b;
+    color: #c7c7c7;
+    cursor: pointer;
+    text-align: center;
+    transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+}
+
+.file-upload-label.drag-over {
+    background-color: #444;
+    border-color: #007bff;
+}
+
+.file-upload-label svg {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 15px;
+    stroke: #888;
+    transition: stroke 0.2s ease-in-out;
+}
+
+.file-upload-label.drag-over svg {
+    stroke: #007bff;
+}
+
+.file-upload-label span {
+    font-weight: 500;
+    font-size: 1.1em;
+}
+
+#file-list-container {
+    margin-top: 20px;
+    max-height: 250px;
+    overflow-y: auto;
+    background-color: #242424;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 15px;
+}
+
+#file-list-container:empty {
+    display: none;
+}
+
+.file-list-header {
+    font-size: 0.9em;
+    color: #a0a0a0;
+    margin: 0 0 10px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #444;
+}
+
+.file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background-color: #3a3a3a;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.file-item:last-child {
+    margin-bottom: 0;
+}
+
+.file-details {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-icon {
+    flex-shrink: 0;
+}
+
+.file-name {
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    color: #e0e0e0;
+}
+
+.file-size {
+    color: #b0b0b0;
+    flex-shrink: 0;
+}
+
+.remove-file-btn {
+    background: transparent;
+    border: none;
+    color: #ff5555;
+    cursor: pointer;
+    font-size: 1.4em;
+    line-height: 1;
+    padding: 0 5px;
+    transition: color 0.2s ease-in-out;
+}
+
+.remove-file-btn:hover {
+    color: #ff0000;
+}
+
+/* --- End New File Upload Styles --- */
+
 /* --- New ShadCN/UI Inspired Loader (for index.html) --- */
 .loader-overlay {
     position: fixed;

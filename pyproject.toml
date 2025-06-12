@@ -1,0 +1,7 @@
+# A minimal pyproject.toml for tool config only
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+line_length = 88

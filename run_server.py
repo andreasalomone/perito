@@ -1,10 +1,11 @@
 import asyncio
-from hypercorn.config import Config
+import os  # Import os
+
 from hypercorn.asyncio import serve
-import os # Import os
+from hypercorn.config import Config
 
 from app import app  # Import your Flask app instance
-from core.config import settings # Import your application settings
+from core.config import settings  # Import your application settings
 
 # Create a Hypercorn Config object
 config = Config()
@@ -15,9 +16,9 @@ config.application_path = "app:app"  # Path to your Flask app
 port = int(os.environ.get("PORT", 5000))
 config.bind = [f"0.0.0.0:{port}"]
 
-config.accesslog = "-" # Log access to stdout
-config.errorlog = "-"   # Log errors to stdout
-config.loglevel = settings.LOG_LEVEL.lower() # Use LOG_LEVEL from settings
+config.accesslog = "-"  # Log access to stdout
+config.errorlog = "-"  # Log errors to stdout
+config.loglevel = settings.LOG_LEVEL.lower()  # Use LOG_LEVEL from settings
 
 # Set the crucial wsgi_max_body_size
 config.wsgi_max_body_size = settings.MAX_TOTAL_UPLOAD_SIZE_BYTES
@@ -29,4 +30,4 @@ if __name__ == "__main__":
     print(f"Starting Hypercorn server programmatically on port {port}...")
     print(f"WSGI Max Body Size configured to: {config.wsgi_max_body_size} bytes")
     print(f"Log Level: {config.loglevel}")
-    asyncio.run(serve(app, config)) 
+    asyncio.run(serve(app, config))

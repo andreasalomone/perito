@@ -1,51 +1,62 @@
+import io
+import os
+import re
+from typing import List
+
 from docx import Document
-from docx.shared import Pt, Inches, RGBColor, Cm
+from docx.enum.table import (  # Per l'allineamento verticale nelle celle
+    WD_CELL_VERTICAL_ALIGNMENT,
+)
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT # Per l'allineamento verticale nelle celle
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-import io
-import re
-import os
-from typing import List
+from docx.shared import Cm, Inches, Pt, RGBColor
 
 from core.config import settings
 
 # Colore per "BN Surveys Srls" nel footer (campiona dal tuo PDF per precisione)
-FOOTER_BN_SURVEYS_COLOR = RGBColor(0x54, 0x8D, 0xD4) # Esempio Blu (da affinare)
+FOOTER_BN_SURVEYS_COLOR = RGBColor(0x54, 0x8D, 0xD4)  # Esempio Blu (da affinare)
+
 
 def set_cell_margins(cell, top=0, start=0, bottom=0, end=0):
     """Imposta i margini interni di una cella (in dxa, 1 inch = 1440 dxa)."""
     tcPr = cell._tc.get_or_add_tcPr()
-    tcMar = OxmlElement('w:tcMar')
-    for m_name, m_val in [('top', top), ('start', start), ('bottom', bottom), ('end', end)]:
-        mar_el = OxmlElement(f'w:{m_name}')
-        mar_el.set(qn('w:w'), str(m_val))
-        mar_el.set(qn('w:type'), 'dxa')
+    tcMar = OxmlElement("w:tcMar")
+    for m_name, m_val in [
+        ("top", top),
+        ("start", start),
+        ("bottom", bottom),
+        ("end", end),
+    ]:
+        mar_el = OxmlElement(f"w:{m_name}")
+        mar_el.set(qn("w:w"), str(m_val))
+        mar_el.set(qn("w:type"), "dxa")
         tcMar.append(mar_el)
     tcPr.append(tcMar)
+
 
 def remove_table_borders(table):
     """Rende invisibili tutti i bordi di una tabella."""
     for row in table.rows:
         for cell in row.cells:
             tcPr = cell._tc.get_or_add_tcPr()
-            tcBorders = OxmlElement('w:tcBorders')
+            tcBorders = OxmlElement("w:tcBorders")
             for border_name in ["top", "left", "bottom", "right", "insideH", "insideV"]:
-                border_el = OxmlElement(f'w:{border_name}')
-                border_el.set(qn('w:val'), 'nil') # 'nil' o 'none' per nessun bordo
+                border_el = OxmlElement(f"w:{border_name}")
+                border_el.set(qn("w:val"), "nil")  # 'nil' o 'none' per nessun bordo
                 # border_el.set(qn('w:sz'), '0') # Opzionale: dimensione a 0
                 # border_el.set(qn('w:space'), '0') # Opzionale: spazio a 0
                 # border_el.set(qn('w:color'), 'auto') # Opzionale: colore auto
                 tcBorders.append(border_el)
             tcPr.append(tcBorders)
 
+
 def add_logo_to_header(header, logo_path, width=None, height=None):
     """Aggiunge un logo all'header, allineato a sinistra."""
     paragraph = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
-    paragraph.clear() # Rimuove contenuto preesistente dal paragrafo di default dell'header
+    paragraph.clear()  # Rimuove contenuto preesistente dal paragrafo di default dell'header
     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    
+
     # Riduci al minimo lo spazio prima/dopo il paragrafo del logo nell'header
     fmt = paragraph.paragraph_format
     fmt.space_before = Pt(0)
@@ -60,7 +71,9 @@ def add_logo_to_header(header, logo_path, width=None, height=None):
         # L'allineamento del paragrafo a sinistra è il massimo che possiamo fare standard.
         run.add_picture(logo_path, width=width, height=height)
     except FileNotFoundError:
-        print(f"ERRORE: File logo non trovato in {logo_path}. Il logo non sarà aggiunto.")
+        print(
+            f"ERRORE: File logo non trovato in {logo_path}. Il logo non sarà aggiunto."
+        )
     except Exception as e:
         print(f"ERRORE durante l'aggiunta del logo: {e}. Il logo non sarà aggiunto.")
 
@@ -84,37 +97,59 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     section.footer_distance = Cm(1.25)
 
     # --- Impostazioni di Stile di Default per l'Intero Documento ---
-    style = document.styles['Normal']
+    style = document.styles["Normal"]
     font = style.font
     font.name = settings.DOCX_FONT_NAME
     font.size = Pt(settings.DOCX_FONT_SIZE_NORMAL)
     paragraph_format = style.paragraph_format
-    paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY # Giustifica il testo
-    paragraph_format.line_spacing = settings.DOCX_LINE_SPACING if hasattr(settings, 'DOCX_LINE_SPACING') else 1.5
+    paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY  # Giustifica il testo
+    paragraph_format.line_spacing = (
+        settings.DOCX_LINE_SPACING if hasattr(settings, "DOCX_LINE_SPACING") else 1.5
+    )
     paragraph_format.space_before = Pt(0)
-    paragraph_format.space_after = Pt(settings.DOCX_SPACE_AFTER_PARAGRAPH if hasattr(settings, 'DOCX_SPACE_AFTER_PARAGRAPH') else 0)
+    paragraph_format.space_after = Pt(
+        settings.DOCX_SPACE_AFTER_PARAGRAPH
+        if hasattr(settings, "DOCX_SPACE_AFTER_PARAGRAPH")
+        else 0
+    )
 
     # --- Header con Logo su Ogni Pagina ---
     # Il path va risolto correttamente rispetto all'esecuzione dello script.
     # Se lo script è nella root del progetto e assets è una subdir:
-    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', 'logos', 'bn-surveys-logo.png')
-    if not os.path.exists(logo_path): # Fallback se il path relativo sopra non funziona (es. in contesti diversi)
+    logo_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "assets",
+        "logos",
+        "bn-surveys-logo.png",
+    )
+    if not os.path.exists(
+        logo_path
+    ):  # Fallback se il path relativo sopra non funziona (es. in contesti diversi)
         logo_path = "assets/logos/bn-surveys-logo.png"
 
     header = document.sections[0].header
     add_logo_to_header(header, logo_path, width=Cm(4), height=Cm(2.73))
 
     # --- Elaborazione del Contenuto Testuale Generato dall'LLM ---
-    lines: List[str] = plain_text_report_content.split('\n')
+    lines: List[str] = plain_text_report_content.split("\n")
 
     recipient_block_active = True
     subject_line_pattern = re.compile(r"^\s*Oggetto\s*:\s*(.*)", re.IGNORECASE)
-    date_line_pattern = re.compile(r"^\s*Genova,\s*\d{1,2}\s+[a-zà-ú]+\s+\d{4}\s*$", re.IGNORECASE)
-    reference_line_pattern = re.compile(r"^\s*(Vs\. Rif\.|Polizza|Ns\. Rif\.)\s*:\s*(.*)") # Per i riferimenti tipo Vs. Rif.
-    section_title_pattern = re.compile(r"^\s*([0-9]+)\s*–\s*([A-Z\sÀ-Ù'&]+)\s*$") # Es. "1 – DATI GENERALI"
-    
-    is_first_content_paragraph_after_initial_blocks = True # Per gestire spazio prima del primo paragrafo narrativo
-    initial_right_aligned_lines_count = 0 # Counter for the first five lines
+    date_line_pattern = re.compile(
+        r"^\s*Genova,\s*\d{1,2}\s+[a-zà-ú]+\s+\d{4}\s*$", re.IGNORECASE
+    )
+    reference_line_pattern = re.compile(
+        r"^\s*(Vs\. Rif\.|Polizza|Ns\. Rif\.)\s*:\s*(.*)"
+    )  # Per i riferimenti tipo Vs. Rif.
+    section_title_pattern = re.compile(
+        r"^\s*([0-9]+)\s*–\s*([A-Z\sÀ-Ù'&]+)\s*$"
+    )  # Es. "1 – DATI GENERALI"
+
+    is_first_content_paragraph_after_initial_blocks = (
+        True  # Per gestire spazio prima del primo paragrafo narrativo
+    )
+    initial_right_aligned_lines_count = 0  # Counter for the first five lines
 
     # --- State for table processing ---
     is_in_table_block = False
@@ -135,13 +170,13 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
             # Process the collected table lines
             if table_lines:
                 _create_damage_table(document, table_lines)
-            table_lines = [] # Reset for next potential table
+            table_lines = []  # Reset for next potential table
             continue
         elif is_in_table_block:
-            if stripped_line: # Ignore empty lines within the block
+            if stripped_line:  # Ignore empty lines within the block
                 table_lines.append(original_line)
             continue
-        
+
         # --- TABLE BLOCK DETECTION (DATI GENERALI) ---
         if "[INIZIO_DATI_GENERALI]" in stripped_line:
             is_in_dati_generali_block = True
@@ -153,7 +188,7 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
             dati_generali_lines = []
             continue
         elif is_in_dati_generali_block:
-            if stripped_line: # Ignore empty lines
+            if stripped_line:  # Ignore empty lines
                 dati_generali_lines.append(stripped_line)
             continue
 
@@ -162,24 +197,28 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
         # Force the first five lines to have a large left indent, creating the desired visual alignment.
         if initial_right_aligned_lines_count < 5:
             p = document.add_paragraph(stripped_line if stripped_line else " ")
-            
+
             # Set alignment to LEFT and add a large left_indent, as per the user's reference image.
             p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             fmt = p.paragraph_format
-            fmt.left_indent = Cm(10) # From the reference image "Indents: Left: 9.99 cm"
+            fmt.left_indent = Cm(
+                10
+            )  # From the reference image "Indents: Left: 9.99 cm"
 
             # Minimal spacing for this block
             fmt.space_before = Pt(0)
             fmt.space_after = Pt(0)
             fmt.line_spacing = 1.25
-            if initial_right_aligned_lines_count == 0 and line_num == 0: # Only for the very first line of the document
-                fmt.space_before = Pt(10) # Add some space after the header/logo
-            
+            if (
+                initial_right_aligned_lines_count == 0 and line_num == 0
+            ):  # Only for the very first line of the document
+                fmt.space_before = Pt(10)  # Add some space after the header/logo
+
             # Make the second line bold as requested.
             if initial_right_aligned_lines_count == 1:
                 for run in p.runs:
                     run.bold = True
-            
+
             initial_right_aligned_lines_count += 1
             continue
 
@@ -191,14 +230,16 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
             fmt.first_line_indent = Pt(0)
             fmt.space_before = Pt(0)
             fmt.space_after = Pt(0)
-            is_first_content_paragraph_after_initial_blocks = True # Reimposta per il prossimo blocco
+            is_first_content_paragraph_after_initial_blocks = (
+                True  # Reimposta per il prossimo blocco
+            )
             continue
 
         # 3. Gestione Riferimenti (Vs. Rif., Polizza, Ns. Rif.)
         ref_match = reference_line_pattern.match(stripped_line)
         if ref_match:
             # Create paragraph with 'List Bullet' style for automatic bullet character.
-            p = document.add_paragraph(stripped_line, style='List Bullet')
+            p = document.add_paragraph(stripped_line, style="List Bullet")
             fmt = p.paragraph_format
 
             # Apply formatting based on user images.
@@ -215,11 +256,11 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
 
             # Pagination and Hyphenation settings.
             fmt.widow_control = True
-            
+
             # Disable hyphenation for this paragraph using OXML.
             pPr = p._p.get_or_add_pPr()
-            hyphenation = OxmlElement('w:hyphenation')
-            hyphenation.set(qn('w:val'), '0') # '0' corresponds to 'false'
+            hyphenation = OxmlElement("w:hyphenation")
+            hyphenation.set(qn("w:val"), "0")  # '0' corresponds to 'false'
             pPr.append(hyphenation)
 
             # Font styling for the runs within the paragraph.
@@ -238,18 +279,22 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
         if subject_match:
             full_subject_text = subject_match.group(0).strip()
             label_text = "Oggetto:"
-            content_after_oggetto = full_subject_text[len(label_text):].strip()
+            content_after_oggetto = full_subject_text[len(label_text) :].strip()
 
             # Calcola la larghezza totale disponibile per la tabella
-            content_width = document.sections[0].page_width - document.sections[0].left_margin - document.sections[0].right_margin
-            
+            content_width = (
+                document.sections[0].page_width
+                - document.sections[0].left_margin
+                - document.sections[0].right_margin
+            )
+
             table = document.add_table(rows=1, cols=2)
-            table.style = 'Table Grid'
+            table.style = "Table Grid"
             table.autofit = False
             table.allow_autofit = False
-            
+
             # Imposta larghezze colonne
-            col1_width = Cm(2.43) # Larghezza fissa per "Oggetto:"
+            col1_width = Cm(2.43)  # Larghezza fissa per "Oggetto:"
             col2_width = content_width - col1_width
             table.columns[0].width = col1_width
             table.columns[1].width = col2_width
@@ -263,17 +308,21 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
 
             for run in para_label.runs:
                 run.font.name = settings.DOCX_FONT_NAME
-                run.font.size = Pt(settings.DOCX_FONT_SIZE_NORMAL) # Dovrebbe essere 12pt
+                run.font.size = Pt(
+                    settings.DOCX_FONT_SIZE_NORMAL
+                )  # Dovrebbe essere 12pt
                 run.bold = True
 
             # --- Cella 2: Contenuto dell'oggetto ---
             cell_content = table.cell(0, 1)
             cell_content.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             para_content = cell_content.paragraphs[0]
-            para_content.text = "" # Svuota il paragrafo per aggiungere i run formattati
+            para_content.text = (
+                ""  # Svuota il paragrafo per aggiungere i run formattati
+            )
             para_content.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             para_content.paragraph_format.line_spacing = 1.0
-            
+
             # Regex per trovare il testo da mettere in grassetto tra "Ass.to " e " -"
             pattern = re.compile(r"^(Ass\.to\s+)(.+?)(?=\s*-)", re.IGNORECASE)
             match = pattern.match(content_after_oggetto)
@@ -290,9 +339,9 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
                 run2.font.name = settings.DOCX_FONT_NAME
                 run2.font.size = Pt(settings.DOCX_FONT_SIZE_NORMAL)
                 run2.bold = True
-                
+
                 # Aggiungi il resto della stringa (dal trattino in poi)
-                rest_of_string = content_after_oggetto[match.end():]
+                rest_of_string = content_after_oggetto[match.end() :]
                 run3 = para_content.add_run(rest_of_string)
                 run3.font.name = settings.DOCX_FONT_NAME
                 run3.font.size = Pt(settings.DOCX_FONT_SIZE_NORMAL)
@@ -303,11 +352,18 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
                 run.font.name = settings.DOCX_FONT_NAME
                 run.font.size = Pt(settings.DOCX_FONT_SIZE_NORMAL)
                 run.bold = False
-            
+
             # Aggiungi uno spazio *dopo* la tabella dell'oggetto
             p_after_table = document.add_paragraph()
-            p_after_table.paragraph_format.space_before = Pt(0) # Nessuno spazio prima se quello normale è 6pt
-            p_after_table.paragraph_format.space_after = Pt(settings.DOCX_SPACE_AFTER_PARAGRAPH if hasattr(settings, 'DOCX_SPACE_AFTER_PARAGRAPH') and settings.DOCX_SPACE_AFTER_PARAGRAPH > 0 else 6) # Spazio dopo l'oggetto
+            p_after_table.paragraph_format.space_before = Pt(
+                0
+            )  # Nessuno spazio prima se quello normale è 6pt
+            p_after_table.paragraph_format.space_after = Pt(
+                settings.DOCX_SPACE_AFTER_PARAGRAPH
+                if hasattr(settings, "DOCX_SPACE_AFTER_PARAGRAPH")
+                and settings.DOCX_SPACE_AFTER_PARAGRAPH > 0
+                else 6
+            )  # Spazio dopo l'oggetto
             is_first_content_paragraph_after_initial_blocks = True
             continue
 
@@ -323,48 +379,68 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
         if section_title_match:
             p = document.add_paragraph(stripped_line)
             fmt = p.paragraph_format
-            fmt.alignment = WD_ALIGN_PARAGRAPH.LEFT # Assicura che i titoli rimangano allineati a sinistra
-            
+            fmt.alignment = (
+                WD_ALIGN_PARAGRAPH.LEFT
+            )  # Assicura che i titoli rimangano allineati a sinistra
+
             # Applica lo stile grassetto e corsivo ai titoli di sezione come richiesto.
             for run in p.runs:
                 run.bold = True
-                run.italic = True # FIX: Aggiungi corsivo
+                run.italic = True  # FIX: Aggiungi corsivo
 
-            fmt.space_before = Pt(12 if not is_first_content_paragraph_after_initial_blocks else 6) # Più spazio prima dei titoli di sezione
-            fmt.space_after = Pt(6) # Spazio dopo il titolo
+            fmt.space_before = Pt(
+                12 if not is_first_content_paragraph_after_initial_blocks else 6
+            )  # Più spazio prima dei titoli di sezione
+            fmt.space_after = Pt(6)  # Spazio dopo il titolo
             is_first_content_paragraph_after_initial_blocks = False
             continue
 
         # Handle final disclaimer lines
-        if stripped_line.startswith("Il presente certificato di perizia viene emesso") or \
-           stripped_line.startswith("Gli scriventi si riservano il diritto"):
+        if stripped_line.startswith(
+            "Il presente certificato di perizia viene emesso"
+        ) or stripped_line.startswith("Gli scriventi si riservano il diritto"):
             p = document.add_paragraph(stripped_line)
-            p.paragraph_format.first_line_indent = Cm(1.25) # Ripristina l'indentazione di default
-            p.paragraph_format.line_spacing = 1.0 # Override del line spacing di default
+            p.paragraph_format.first_line_indent = Cm(
+                1.25
+            )  # Ripristina l'indentazione di default
+            p.paragraph_format.line_spacing = (
+                1.0  # Override del line spacing di default
+            )
             for run in p.runs:
                 run.italic = True
             continue
 
         # 6. Gestione Paragrafi Normali, Liste e Contenuto Indentato
-        if not stripped_line and line.strip() == "": # Riga vuota per spaziatura
-            if line_num > 0 and lines[line_num-1].strip():
-                 document.add_paragraph() # Crea lo spazio dato da \n\n (usa space_after di default)
-            is_first_content_paragraph_after_initial_blocks = True # Potrebbe essere una separazione prima di un nuovo blocco
+        if not stripped_line and line.strip() == "":  # Riga vuota per spaziatura
+            if line_num > 0 and lines[line_num - 1].strip():
+                document.add_paragraph()  # Crea lo spazio dato da \n\n (usa space_after di default)
+            is_first_content_paragraph_after_initial_blocks = (
+                True  # Potrebbe essere una separazione prima di un nuovo blocco
+            )
             continue
         elif stripped_line:
             p = document.add_paragraph()
             fmt = p.paragraph_format
-            
+
             # Paragrafo standard
             p.text = stripped_line
             # Apply a first-line indent to all standard paragraphs
             fmt.first_line_indent = Cm(1.25)
-            if is_first_content_paragraph_after_initial_blocks and not section_title_match:
+            if (
+                is_first_content_paragraph_after_initial_blocks
+                and not section_title_match
+            ):
                 # Aggiungi spazio prima del primo paragrafo effettivo
-                prev_line_empty_or_subject = (line_num > 0 and not lines[line_num-1].strip()) or \
-                                                (line_num > 0 and subject_line_pattern.match(lines[line_num-1].strip()))
-                if prev_line_empty_or_subject :
-                    fmt.space_before = Pt(0) # Spazio prima del primo paragrafo effettivo
+                prev_line_empty_or_subject = (
+                    line_num > 0 and not lines[line_num - 1].strip()
+                ) or (
+                    line_num > 0
+                    and subject_line_pattern.match(lines[line_num - 1].strip())
+                )
+                if prev_line_empty_or_subject:
+                    fmt.space_before = Pt(
+                        0
+                    )  # Spazio prima del primo paragrafo effettivo
                     fmt.space_after = Pt(0)
             is_first_content_paragraph_after_initial_blocks = False
             continue
@@ -375,7 +451,7 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
 
     section = document.sections[0]
     footer = section.footer
-    footer.is_linked_to_previous = False # Assicura footer specifico per questa sezione
+    footer.is_linked_to_previous = False  # Assicura footer specifico per questa sezione
 
     # Svuota il footer da paragrafi preesistenti per sicurezza
     for para in footer.paragraphs:
@@ -384,7 +460,7 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     # 1. Paragrafo per il numero di pagina
     p_page_num = footer.add_paragraph()
     p_page_num.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    
+
     # Rimuovi qualsiasi indentazione ereditata dallo stile 'Normal'
     fmt_page_num = p_page_num.paragraph_format
     fmt_page_num.first_line_indent = Pt(0)
@@ -395,16 +471,16 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     run_page = p_page_num.add_run()
     run_page.font.name = settings.DOCX_FONT_NAME
     run_page.font.size = Pt(12)
-    
+
     # Aggiungi campo PAGE per il numero di pagina
-    fldChar_begin = OxmlElement('w:fldChar')
-    fldChar_begin.set(qn('w:fldCharType'), 'begin')
-    instrText = OxmlElement('w:instrText')
-    instrText.set(qn('xml:space'), 'preserve')
+    fldChar_begin = OxmlElement("w:fldChar")
+    fldChar_begin.set(qn("w:fldCharType"), "begin")
+    instrText = OxmlElement("w:instrText")
+    instrText.set(qn("xml:space"), "preserve")
     instrText.text = "PAGE"
-    fldChar_end = OxmlElement('w:fldChar')
-    fldChar_end.set(qn('w:fldCharType'), 'end')
-    
+    fldChar_end = OxmlElement("w:fldChar")
+    fldChar_end.set(qn("w:fldCharType"), "end")
+
     run_page._r.append(fldChar_begin)
     run_page._r.append(instrText)
     run_page._r.append(fldChar_end)
@@ -423,15 +499,16 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
     # Popola il paragrafo con il testo statico, formattando "BN Surveys Srls"
     parts1 = footer_static_text_line1.split("BN Surveys Srls", 1)
     if len(parts1) == 2:
-        if parts1[0]: p_text.add_run(parts1[0])
+        if parts1[0]:
+            p_text.add_run(parts1[0])
         run_company1 = p_text.add_run("BN Surveys Srls")
         run_company1.font.color.rgb = FOOTER_BN_SURVEYS_COLOR
         run_company1.bold = True
         p_text.add_run(parts1[1])
     else:
         p_text.add_run(footer_static_text_line1)
-    
-    p_text.add_run().add_break() # Interruzione di riga per la seconda linea
+
+    p_text.add_run().add_break()  # Interruzione di riga per la seconda linea
     p_text.add_run(footer_static_text_line2)
 
     # Applica stile font a tutto il testo nel paragrafo
@@ -439,12 +516,12 @@ def create_styled_docx(plain_text_report_content: str) -> io.BytesIO:
         run.font.name = settings.DOCX_FONT_NAME
         run.font.size = Pt(12)
 
-
     # Salva in un oggetto BytesIO
     file_stream: io.BytesIO = io.BytesIO()
     document.save(file_stream)
     file_stream.seek(0)
     return file_stream
+
 
 def _create_damage_table(document, lines: List[str]):
     """Creates and styles a real DOCX table from text lines."""
@@ -452,14 +529,14 @@ def _create_damage_table(document, lines: List[str]):
         return
 
     # Determine column count from the header row (first line)
-    header_cols = re.split(r'\s{2,}', lines[0].strip())
+    header_cols = re.split(r"\s{2,}", lines[0].strip())
     num_cols = len(header_cols)
     if num_cols == 0:
         return
 
     table = document.add_table(rows=0, cols=num_cols)
     table.autofit = True
-    table.style = 'Table Grid'
+    table.style = "Table Grid"
 
     for i, line in enumerate(lines):
         stripped_line = line.strip()
@@ -468,18 +545,18 @@ def _create_damage_table(document, lines: List[str]):
 
         row_cells = table.add_row().cells
         # Split the row by 2 or more spaces to get columns
-        cols = re.split(r'\s{2,}', stripped_line)
-        
+        cols = re.split(r"\s{2,}", stripped_line)
+
         # Distribute columns into cells, checking for the 'wxyz' placeholder
         for j, cell_content in enumerate(cols):
             if j < len(row_cells):
                 # If the content is the placeholder, insert an empty string.
                 # Otherwise, insert the content.
-                if cell_content.strip().lower() == 'wxyz':
-                    row_cells[j].text = ''
+                if cell_content.strip().lower() == "wxyz":
+                    row_cells[j].text = ""
                 else:
                     row_cells[j].text = cell_content
-        
+
         # If this is the header row (the first line), make its content bold.
         if i == 0:
             for cell in row_cells:
@@ -499,33 +576,38 @@ def _create_damage_table(document, lines: List[str]):
                 fmt.line_spacing = 1.0
                 fmt.space_before = Pt(0)
                 fmt.space_after = Pt(0)
-    
+
     # Add some space after the table
     document.add_paragraph()
 
+
 def _create_dati_generali_table(document, lines: List[str]):
     """Creates a 3-column table for Dati Generali with visible borders."""
-    
+
     # Calcola larghezze colonne
-    content_width = document.sections[0].page_width - document.sections[0].left_margin - document.sections[0].right_margin
+    content_width = (
+        document.sections[0].page_width
+        - document.sections[0].left_margin
+        - document.sections[0].right_margin
+    )
     col1_width = Cm(6.81)
     col2_width = Cm(0.49)
     col3_width = content_width - col1_width - col2_width
 
     table = document.add_table(rows=0, cols=3)
-    table.style = 'Table Grid'
+    table.style = "Table Grid"
     table.autofit = False
     table.allow_autofit = False
 
     table.columns[0].width = col1_width
     table.columns[1].width = col2_width
     table.columns[2].width = col3_width
-    
-    cell_inset_dxa = int((4 / 72) * 1440) # 4pt Text Inset
+
+    cell_inset_dxa = int((4 / 72) * 1440)  # 4pt Text Inset
 
     # --- New, more robust logic for processing table data ---
     # This logic groups multi-line values together before creating table rows.
-    
+
     data_to_render = []
     current_label = None
     current_value_lines = []
@@ -536,14 +618,14 @@ def _create_dati_generali_table(document, lines: List[str]):
         if not stripped_line:
             continue
 
-        if ':' in stripped_line:
+        if ":" in stripped_line:
             # When a new label is found, save the previous one (if it exists)
             if current_label is not None:
-                full_value = '\n'.join(current_value_lines)
-                data_to_render.append({'label': current_label, 'value': full_value})
-            
+                full_value = "\n".join(current_value_lines)
+                data_to_render.append({"label": current_label, "value": full_value})
+
             # Start a new entry
-            label, value = stripped_line.split(':', 1)
+            label, value = stripped_line.split(":", 1)
             current_label = label.strip()
             # Handle cases where the value is on the same line or the next line
             if value.strip():
@@ -557,39 +639,45 @@ def _create_dati_generali_table(document, lines: List[str]):
 
     # Add the very last entry after the loop finishes
     if current_label is not None:
-        full_value = '\n'.join(current_value_lines)
-        data_to_render.append({'label': current_label, 'value': full_value})
+        full_value = "\n".join(current_value_lines)
+        data_to_render.append({"label": current_label, "value": full_value})
 
     # Second pass: Render the grouped data into the table
     for item in data_to_render:
         row_cells = table.add_row().cells
-        
+
         # Column 1: Label
-        row_cells[0].text = item['label']
-        
+        row_cells[0].text = item["label"]
+
         # Column 2: Colon
         row_cells[1].text = ":"
 
         # Column 3: Value (potentially multi-line)
-        row_cells[2].text = item['value']
+        row_cells[2].text = item["value"]
 
     # Apply formatting to all cells
     for row in table.rows:
         for i, cell in enumerate(row.cells):
-            set_cell_margins(cell, top=cell_inset_dxa, start=cell_inset_dxa, bottom=cell_inset_dxa, end=cell_inset_dxa)
+            set_cell_margins(
+                cell,
+                top=cell_inset_dxa,
+                start=cell_inset_dxa,
+                bottom=cell_inset_dxa,
+                end=cell_inset_dxa,
+            )
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
-            
+
             for p in cell.paragraphs:
                 # Apply bold to all text
                 for run in p.runs:
                     run.bold = True
-                
+
                 # Set alignment
-                if i in [1, 2]: # Colon and Content
+                if i in [1, 2]:  # Colon and Content
                     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                else: # Label
+                else:  # Label
                     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                
+
                 # Set line spacing
                 fmt = p.paragraph_format
                 fmt.line_spacing = 1.0

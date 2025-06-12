@@ -25,4 +25,4 @@ accesslog = "-"
 # worker_class = "asyncio" # or "uvloop" if uvloop is installed
 
 # Ensure your Flask app is referenced correctly if you were to define 'application_path' here
-# application_path = "app:app" # But we'll pass this on the CLI for simplicity for now 
+# application_path = "app:app" # But we'll pass this on the CLI for simplicity for now

@@ -1,0 +1,20 @@
+# .flake8
+
+[flake8]
+# Set the same line length as black to avoid conflicts
+max-line-length = 88
+
+# W503 and E203 are two common errors to ignore for black compatibility.
+# E203: whitespace before ':' (black adds it in slices)
+extend-ignore = E203, W503
+
+# Directories/files to exclude from linting
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    build,
+    dist
+
+# Optional: Set a max complexity for functions (default is 10)
+max-complexity = 10
