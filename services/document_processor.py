@@ -256,6 +256,15 @@ def process_eml_file(eml_path: str, upload_folder: str) -> List[Dict[str, Any]]:
             )
             continue
 
+        # Check for excluded extensions
+        _, ext = os.path.splitext(original_filename)
+        ext = ext.lower()
+        if ext in [".gif", ".mp4", ".avi", ".mov", ".mkv", ".webm"]:
+            logger.info(
+                f"Skipping excluded attachment type '{ext}' for file '{original_filename}' in {eml_path}"
+            )
+            continue
+
         # CORRECTED LOGIC: Attempt to process ALL attachments, letting process_uploaded_file handle filtering.
         try:
             # Ensure payload is a string and strip whitespace
